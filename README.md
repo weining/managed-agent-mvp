@@ -56,7 +56,17 @@ sandbox_id: xxxxxxxx                   # 必填：Sandbox ID
 
 其余字段有默认值，按需修改即可。
 
-### 第三步：构建并启动
+### 第三步：解压 Skills
+
+项目内置的 Skills 以压缩包形式提供，运行前需先解压：
+
+```bash
+unzip skills.zip
+```
+
+解压后会在项目根目录生成 `skills/` 目录。
+
+### 第四步：构建并启动
 
 ```bash
 # 构建并启动
