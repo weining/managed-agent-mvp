@@ -5,7 +5,7 @@
 
 # ── LLM ──────────────────────────────────────────────
 llm_base_url: https://oneapi-comate.baidu-int.com
-llm_api_key: sk-hGpOvDfa4VHM1qPh82Ff522525F54c3f80656e5fB3E3E859
+llm_api_key: Your-OneApi-Key
 llm_model: Claude Sonnet 4.6
 llm_max_tokens: 8192
 
