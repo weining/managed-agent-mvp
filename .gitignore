@@ -1,0 +1,17 @@
+# Binary
+managed-agent
+
+# Real config (contains secrets) — only commit config.yaml as example
+config.local.yaml
+
+# Session data
+data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+bin/
+
+# OS
+.DS_Store

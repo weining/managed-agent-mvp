@@ -1,45 +1,52 @@
-# http://buildcloud.baidu.com/ci_yml/2-config_format_spec
-
 Global:
-  version: 2.0
-  #group_email: xxx@baidu.com   # <------ 配置团队邮箱地址，用于接收latest软件版本升级通知邮件
-
+  version: "2.0"
+  group_email: xxx@baidu.com
 Default:
-  profile: [dev]
-
+  profile:
+    - amd64_build
 Profiles:
   - profile:
-    name: dev
+    name: amd64_build
     mode: AGENT
     environment:
-      image: DECK_STD_CENTOS7          # http://buildcloud.baidu.com/submitter/5-env_declare
+      image: DECK_STD_CENTOS7
       resourceType: MEDIUM
-      #tools:                          # <------ 配置软件版本信息
-      #  - go: latest                  # http://buildcloud.baidu.com/ci_yml/2-config_format_spec\#20.-specify-dev-tool-for-AGENT-template
+      tools:
+        - go: 1.23.latest
+        - gcc: 12
     build:
-      command: sh build.sh
-      cache:
-        enable: true
-        trimeThresholdSize: 1
-        #paths:
-        #  - packages
+      command: make -f Makefile
     artifacts:
       release: true
-
   - profile:
-    name: publish
+    name: arm64_build
     mode: AGENT
     environment:
-      image: DECK_STD_CENTOS7          # http://buildcloud.baidu.com/submitter/5-env_declare
+      image: DECK_STD_CENTOS7
       resourceType: MEDIUM
-      #tools:                          # <------ 配置软件版本信息
-      #  - go: latest                  # http://buildcloud.baidu.com/ci_yml/2-config_format_spec\#20.-specify-dev-tool-for-AGENT-template
+      tools:
+        - go: 1.23.latest
+        - gcc: 12
     build:
-      command: sh publish.sh
-      cache:
-        enable: true
-        trimeThresholdSize: 1
-        #paths:
-        #  - packages
+      command: export GOOS=linux; export GOARCH=arm64; make -f Makefile
+    artifacts:
+      platform:
+        arch: AARCH64
+        os: LINUX
+      release: true
+  - profile:
+    name: gcover
+    mode: AGENT
+    environment:
+      image: DECK_STD_CENTOS7
+      resourceType: MEDIUM
+      tools:
+        - go: 1.23.latest
+        - gcc: 12
+    build:
+      gcover:
+        enable: true # <------ 开启打桩编译
+        flags: -2 # <------ 配置 gcover01 编译参数，-1 开启覆盖率插桩编译，-2 开启覆盖率插件编译(支持debug)，默认值为 -1
+      command: make -f Makefile
     artifacts:
       release: true

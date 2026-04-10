@@ -1,0 +1,25 @@
+# Managed Agent Configuration
+#
+# Priority: environment variables > this file > defaults
+# All fields are optional — defaults are used when not specified.
+
+# ── LLM ──────────────────────────────────────────────
+llm_base_url: https://oneapi-comate.baidu-int.com
+llm_api_key: sk-hGpOvDfa4VHM1qPh82Ff522525F54c3f80656e5fB3E3E859
+llm_model: Claude Sonnet 4.6
+llm_max_tokens: 8192
+
+# Custom header for LLM API requests (JSON string, optional).
+# Example for internal Baidu OneAPI:
+# llm_custom_header: {"agentId": "ducc:user:yourname", "username": "yourname", "repo": "", "source": "ducc"}
+
+# ── Sandbox ──────────────────────────────────────────
+sandbox_base_url: https://8080-t6nk21b8.agent-sandbox.baidu-int.com
+sandbox_id: t6nk21b8
+
+# ── Server ───────────────────────────────────────────
+listen_addr: :8080
+
+# ── Storage ──────────────────────────────────────────
+data_dir: data/sessions
+skills_dir: skills
