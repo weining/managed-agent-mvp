@@ -14,6 +14,7 @@ type Config struct {
 	LLMModel        string `json:"llm_model"`
 	LLMMaxTokens    string `json:"llm_max_tokens"`
 	LLMCustomHeader string `json:"llm_custom_header"` // JSON string for custom request header
+	LLMProvider     string `json:"llm_provider"`
 
 	// Sandbox
 	SandboxBaseURL string `json:"sandbox_base_url"`
@@ -33,6 +34,7 @@ func DefaultConfig() *Config {
 		LLMBaseURL:     "https://oneapi-comate.baidu-int.com",
 		LLMModel:       "Claude Sonnet 4.6",
 		LLMMaxTokens:   "8192",
+		LLMProvider:    "claude",
 		SandboxBaseURL: "https://8080-t6nk21b8.agent-sandbox.baidu-int.com",
 		SandboxID:      "t6nk21b8",
 		ListenAddr:     ":8080",
@@ -71,6 +73,7 @@ func (c *Config) applyEnv() {
 	envOverride(&c.LLMModel, "LLM_MODEL")
 	envOverride(&c.LLMMaxTokens, "LLM_MAX_TOKENS")
 	envOverride(&c.LLMCustomHeader, "LLM_CUSTOM_HEADER")
+	envOverride(&c.LLMProvider, "LLM_PROVIDER")
 	envOverride(&c.SandboxBaseURL, "SANDBOX_BASE_URL")
 	envOverride(&c.SandboxID, "SANDBOX_ID")
 	envOverride(&c.ListenAddr, "LISTEN_ADDR")
@@ -125,6 +128,7 @@ func (c *Config) fieldMap() map[string]*string {
 		"llm_model":         &c.LLMModel,
 		"llm_max_tokens":    &c.LLMMaxTokens,
 		"llm_custom_header": &c.LLMCustomHeader,
+		"llm_provider":      &c.LLMProvider,
 		"sandbox_base_url":  &c.SandboxBaseURL,
 		"sandbox_id":        &c.SandboxID,
 		"listen_addr":       &c.ListenAddr,

@@ -92,7 +92,7 @@ type SSEWriter interface {
 type AgentDeps struct {
 	Store   *SessionStore
 	Sandbox *SDKSandboxClient
-	Claude  *ClaudeClient
+	Claude  LLMClient
 	Skills  *SkillRegistry
 }
 

@@ -32,9 +32,12 @@ func main() {
 	}
 	log.Printf("Sandbox ready: %s via %s", sbx.SandboxID, sbx.BaseURL)
 
-	// Initialize Claude client
-	claude := NewClaudeClient(cfg)
-	log.Printf("LLM ready: %s via %s", claude.Model, claude.BaseURL)
+	// Initialize LLM client
+	llm, err := NewLLMClient(cfg)
+	if err != nil {
+		log.Fatalf("Failed to init LLM client: %v", err)
+	}
+	log.Printf("LLM ready: provider=%s model=%s", cfg.LLMProvider, cfg.LLMModel)
 
 	// Load skills
 	skills := NewSkillRegistry()
@@ -46,7 +49,7 @@ func main() {
 	deps := &AgentDeps{
 		Store:   store,
 		Sandbox: sbx,
-		Claude:  claude,
+		Claude:  llm,
 		Skills:  skills,
 	}
 

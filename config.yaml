@@ -4,6 +4,7 @@
 # All fields are optional — defaults are used when not specified.
 
 # ── LLM ──────────────────────────────────────────────
+# llm_provider: claude   # 可选: claude（默认）/ gemini / openai
 llm_base_url: https://oneapi-comate.baidu-int.com
 llm_api_key: Your-OneApi-Key
 llm_model: Claude Sonnet 4.6

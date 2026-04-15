@@ -12,6 +12,11 @@ import (
 	"strings"
 )
 
+// LLMClient is the unified interface for all LLM providers.
+type LLMClient interface {
+	CallStream(system string, messages []ClaudeMessage, tools []ClaudeTool, cb StreamCallback) (*ClaudeResponse, error)
+}
+
 // --- Anthropic Messages API types ---
 
 type ClaudeRequest struct {
@@ -315,4 +320,18 @@ func (c *ClaudeClient) CallStream(system string, messages []ClaudeMessage, tools
 
 	result.Content = currentBlocks
 	return result, nil
+}
+
+// NewLLMClient creates the appropriate LLM client based on cfg.LLMProvider.
+func NewLLMClient(cfg *Config) (LLMClient, error) {
+	switch cfg.LLMProvider {
+	case "", "claude":
+		return NewClaudeClient(cfg), nil
+	case "gemini":
+		return NewGeminiClient(cfg), nil
+	case "openai":
+		return NewOpenAIClient(cfg), nil
+	default:
+		return nil, fmt.Errorf("unknown llm_provider: %q (valid: claude, gemini, openai)", cfg.LLMProvider)
+	}
 }
