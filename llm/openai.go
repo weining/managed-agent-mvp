@@ -61,7 +61,7 @@ type oaiFunction struct {
 
 type oaiRequest struct {
 	Model     string       `json:"model"`
-	MaxTokens int          `json:"max_tokens"`
+	MaxTokens int          `json:"max_completion_tokens"`
 	Messages  []oaiMessage `json:"messages"`
 	Tools     []oaiTool    `json:"tools,omitempty"`
 	Stream    bool         `json:"stream"`
