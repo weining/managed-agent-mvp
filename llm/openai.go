@@ -1,4 +1,4 @@
-package main
+package llm
 
 import (
 	"bufio"
@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 )
 
@@ -19,18 +18,12 @@ type OpenAIClient struct {
 	MaxTokens int
 }
 
-func NewOpenAIClient(cfg *Config) *OpenAIClient {
-	maxTokens := 8192
-	if cfg.LLMMaxTokens != "" {
-		if v, err := strconv.Atoi(cfg.LLMMaxTokens); err == nil && v > 0 {
-			maxTokens = v
-		}
-	}
+func newOpenAIClient(cfg Config) *OpenAIClient {
 	return &OpenAIClient{
-		BaseURL:   cfg.LLMBaseURL,
-		APIKey:    cfg.LLMAPIKey,
-		Model:     cfg.LLMModel,
-		MaxTokens: maxTokens,
+		BaseURL:   cfg.BaseURL,
+		APIKey:    cfg.APIKey,
+		Model:     cfg.Model,
+		MaxTokens: cfg.MaxTokens,
 	}
 }
 
@@ -38,7 +31,7 @@ func NewOpenAIClient(cfg *Config) *OpenAIClient {
 
 type oaiMessage struct {
 	Role       string        `json:"role"`
-	Content    interface{}   `json:"content,omitempty"` // string or nil
+	Content    interface{}   `json:"content,omitempty"`
 	ToolCalls  []oaiToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string        `json:"tool_call_id,omitempty"`
 	Name       string        `json:"name,omitempty"`
@@ -74,7 +67,6 @@ type oaiRequest struct {
 	Stream    bool         `json:"stream"`
 }
 
-// SSE delta types
 type oaiStreamChunk struct {
 	Choices []oaiStreamChoice `json:"choices"`
 }
@@ -102,7 +94,6 @@ type oaiDeltaFunc struct {
 	Arguments string `json:"arguments"`
 }
 
-// toolCallAccum accumulates streaming tool call data.
 type toolCallAccum struct {
 	id        string
 	name      string
@@ -111,7 +102,6 @@ type toolCallAccum struct {
 
 // CallStream implements LLMClient.
 func (c *OpenAIClient) CallStream(system string, messages []ClaudeMessage, tools []ClaudeTool, cb StreamCallback) (*ClaudeResponse, error) {
-	// Build OpenAI messages
 	var oaiMsgs []oaiMessage
 	if system != "" {
 		oaiMsgs = append(oaiMsgs, oaiMessage{Role: "system", Content: system})
@@ -176,7 +166,6 @@ func (c *OpenAIClient) CallStream(system string, messages []ClaudeMessage, tools
 		}
 	}
 
-	// Build tools
 	var oaiTools []oaiTool
 	for _, t := range tools {
 		oaiTools = append(oaiTools, oaiTool{
@@ -219,11 +208,10 @@ func (c *OpenAIClient) CallStream(system string, messages []ClaudeMessage, tools
 		return nil, fmt.Errorf("openai API error, status=%d, body=%s", resp.StatusCode, string(body))
 	}
 
-	// Parse SSE stream
 	result := &ClaudeResponse{StopReason: "end_turn"}
 	var textBuf strings.Builder
 	accums := map[int]*toolCallAccum{}
-	var toolBlockOrder []int // track insertion order
+	var toolBlockOrder []int
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
@@ -274,12 +262,8 @@ func (c *OpenAIClient) CallStream(system string, messages []ClaudeMessage, tools
 		return nil, fmt.Errorf("openai stream read error: %w", err)
 	}
 
-	// Assemble content blocks
 	if textBuf.Len() > 0 {
-		result.Content = append(result.Content, ContentBlock{
-			Type: "text",
-			Text: textBuf.String(),
-		})
+		result.Content = append(result.Content, ContentBlock{Type: "text", Text: textBuf.String()})
 	}
 	for _, idx := range toolBlockOrder {
 		acc := accums[idx]

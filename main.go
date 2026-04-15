@@ -4,6 +4,8 @@ import (
 	"flag"
 	"log"
 	"net/http"
+
+	"managed-agent/llm"
 )
 
 func main() {
@@ -33,7 +35,9 @@ func main() {
 	log.Printf("Sandbox ready: %s via %s", sbx.SandboxID, sbx.BaseURL)
 
 	// Initialize LLM client
-	llm, err := NewLLMClient(cfg)
+	llmClient, err := llm.New(llm.ParseConfig(
+		cfg.LLMProvider, cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.LLMModel, cfg.LLMMaxTokens,
+	))
 	if err != nil {
 		log.Fatalf("Failed to init LLM client: %v", err)
 	}
@@ -49,7 +53,7 @@ func main() {
 	deps := &AgentDeps{
 		Store:   store,
 		Sandbox: sbx,
-		Claude:  llm,
+		Claude:  llmClient,
 		Skills:  skills,
 	}
 
@@ -60,3 +64,4 @@ func main() {
 		log.Fatalf("Server error: %v", err)
 	}
 }
+

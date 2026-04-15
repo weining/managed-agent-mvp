@@ -1,4 +1,4 @@
-package main
+package llm
 
 import (
 	"bufio"
@@ -8,90 +8,33 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"strconv"
 	"strings"
 )
 
-// LLMClient is the unified interface for all LLM providers.
-type LLMClient interface {
-	CallStream(system string, messages []ClaudeMessage, tools []ClaudeTool, cb StreamCallback) (*ClaudeResponse, error)
-}
+// --- Anthropic Messages API internal types ---
 
-// --- Anthropic Messages API types ---
-
-type ClaudeRequest struct {
-	Model     string          `json:"model"`
-	MaxTokens int             `json:"max_tokens"`
-	System    string          `json:"system,omitempty"`
+type claudeRequest struct {
+	Model     string         `json:"model"`
+	MaxTokens int            `json:"max_tokens"`
+	System    string         `json:"system,omitempty"`
 	Messages  []ClaudeMessage `json:"messages"`
-	Tools     []ClaudeTool    `json:"tools,omitempty"`
-	Stream    bool            `json:"stream,omitempty"`
+	Tools     []ClaudeTool   `json:"tools,omitempty"`
+	Stream    bool           `json:"stream,omitempty"`
 }
 
-type ClaudeMessage struct {
-	Role    string         `json:"role"`
-	Content []ContentBlock `json:"content"`
-}
-
-type ContentBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
-
-	// tool_use
-	ID    string      `json:"id,omitempty"`
-	Name  string      `json:"name,omitempty"`
-	Input interface{} `json:"input,omitempty"`
-
-	// tool_result
-	ToolUseID string `json:"tool_use_id,omitempty"`
-	Content   string `json:"content,omitempty"`
-	IsError   bool   `json:"is_error,omitempty"`
-
-	// thinking
-	Thinking string `json:"thinking,omitempty"`
-}
-
-type ClaudeTool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	InputSchema json.RawMessage `json:"input_schema"`
-}
-
-type ClaudeResponse struct {
-	ID         string         `json:"id"`
-	Type       string         `json:"type"`
-	Role       string         `json:"role"`
-	Content    []ContentBlock `json:"content"`
-	StopReason string         `json:"stop_reason"`
-	Usage      *Usage         `json:"usage,omitempty"`
-}
-
-type Usage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-}
-
-// --- Streaming types ---
-
-type StreamEvent struct {
-	Type  string // event type from SSE
-	Data  json.RawMessage
-	Index int
-}
-
-type ContentBlockStart struct {
+type contentBlockStart struct {
 	Type         string       `json:"type"`
 	Index        int          `json:"index"`
 	ContentBlock ContentBlock `json:"content_block"`
 }
 
-type ContentBlockDelta struct {
+type contentBlockDelta struct {
 	Type  string     `json:"type"`
 	Index int        `json:"index"`
-	Delta DeltaBlock `json:"delta"`
+	Delta deltaBlock `json:"delta"`
 }
 
-type DeltaBlock struct {
+type deltaBlock struct {
 	Type string `json:"type"`
 	Text string `json:"text,omitempty"`
 	JSON string `json:"partial_json,omitempty"`
@@ -100,18 +43,17 @@ type DeltaBlock struct {
 	Thinking string `json:"thinking,omitempty"`
 }
 
-type MessageDelta struct {
+type messageDelta struct {
 	Type  string      `json:"type"`
-	Delta MessageStop `json:"delta"`
+	Delta messageStop `json:"delta"`
 	Usage *Usage      `json:"usage,omitempty"`
 }
 
-type MessageStop struct {
+type messageStop struct {
 	StopReason string `json:"stop_reason"`
 }
 
-// --- Client ---
-
+// ClaudeClient implements LLMClient using the Anthropic Messages API.
 type ClaudeClient struct {
 	BaseURL      string
 	APIKey       string
@@ -120,23 +62,22 @@ type ClaudeClient struct {
 	CustomHeader string // JSON string for comate_custom_header, empty to skip
 }
 
-func NewClaudeClient(cfg *Config) *ClaudeClient {
-	maxTokens := 8192
-	if cfg.LLMMaxTokens != "" {
-		if v, err := strconv.Atoi(cfg.LLMMaxTokens); err == nil && v > 0 {
-			maxTokens = v
-		}
-	}
+func newClaudeClient(cfg Config) *ClaudeClient {
 	return &ClaudeClient{
-		BaseURL:      cfg.LLMBaseURL,
-		APIKey:       cfg.LLMAPIKey,
-		Model:        cfg.LLMModel,
-		MaxTokens:    maxTokens,
-		CustomHeader: cfg.LLMCustomHeader,
+		BaseURL:   cfg.BaseURL,
+		APIKey:    cfg.APIKey,
+		Model:     cfg.Model,
+		MaxTokens: cfg.MaxTokens,
 	}
 }
 
-// setHeaders applies common headers to an API request.
+// NewClaudeClientWithCustomHeader creates a ClaudeClient with a custom header.
+func NewClaudeClientWithCustomHeader(cfg Config, customHeader string) *ClaudeClient {
+	c := newClaudeClient(cfg)
+	c.CustomHeader = customHeader
+	return c
+}
+
 func (c *ClaudeClient) setHeaders(req *http.Request) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", c.APIKey)
@@ -146,48 +87,9 @@ func (c *ClaudeClient) setHeaders(req *http.Request) {
 	}
 }
 
-// Call makes a non-streaming request.
-func (c *ClaudeClient) Call(system string, messages []ClaudeMessage, tools []ClaudeTool) (*ClaudeResponse, error) {
-	reqBody := ClaudeRequest{
-		Model:     c.Model,
-		MaxTokens: c.MaxTokens,
-		System:    system,
-		Messages:  messages,
-		Tools:     tools,
-		Stream:    false,
-	}
-	data, _ := json.Marshal(reqBody)
-
-	req, err := http.NewRequest(http.MethodPost, c.BaseURL+"/v1/messages", bytes.NewReader(data))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	c.setHeaders(req)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to call claude: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("claude API error, status=%d, body=%s", resp.StatusCode, string(body))
-	}
-
-	var result ClaudeResponse
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("failed to decode claude response: %w", err)
-	}
-	return &result, nil
-}
-
-// StreamCallback receives streaming events from Claude.
-type StreamCallback func(eventType string, data interface{})
-
 // CallStream makes a streaming request and invokes cb for each event.
 func (c *ClaudeClient) CallStream(system string, messages []ClaudeMessage, tools []ClaudeTool, cb StreamCallback) (*ClaudeResponse, error) {
-	reqBody := ClaudeRequest{
+	reqBody := claudeRequest{
 		Model:     c.Model,
 		MaxTokens: c.MaxTokens,
 		System:    system,
@@ -217,7 +119,7 @@ func (c *ClaudeClient) CallStream(system string, messages []ClaudeMessage, tools
 	// Parse SSE
 	result := &ClaudeResponse{}
 	var currentBlocks []ContentBlock
-	blockInputJSONs := map[int]*strings.Builder{} // accumulate partial JSON per block index
+	blockInputJSONs := map[int]*strings.Builder{}
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
@@ -247,7 +149,7 @@ func (c *ClaudeClient) CallStream(system string, messages []ClaudeMessage, tools
 			result.Role = msg.Message.Role
 
 		case "content_block_start":
-			var cbs ContentBlockStart
+			var cbs contentBlockStart
 			json.Unmarshal([]byte(dataStr), &cbs)
 			for len(currentBlocks) <= cbs.Index {
 				currentBlocks = append(currentBlocks, ContentBlock{})
@@ -265,7 +167,7 @@ func (c *ClaudeClient) CallStream(system string, messages []ClaudeMessage, tools
 			}
 
 		case "content_block_delta":
-			var cbd ContentBlockDelta
+			var cbd contentBlockDelta
 			json.Unmarshal([]byte(dataStr), &cbd)
 			switch cbd.Delta.Type {
 			case "text_delta":
@@ -306,7 +208,7 @@ func (c *ClaudeClient) CallStream(system string, messages []ClaudeMessage, tools
 			}
 
 		case "message_delta":
-			var md MessageDelta
+			var md messageDelta
 			json.Unmarshal([]byte(dataStr), &md)
 			result.StopReason = md.Delta.StopReason
 			if md.Usage != nil {
@@ -320,18 +222,4 @@ func (c *ClaudeClient) CallStream(system string, messages []ClaudeMessage, tools
 
 	result.Content = currentBlocks
 	return result, nil
-}
-
-// NewLLMClient creates the appropriate LLM client based on cfg.LLMProvider.
-func NewLLMClient(cfg *Config) (LLMClient, error) {
-	switch cfg.LLMProvider {
-	case "", "claude":
-		return NewClaudeClient(cfg), nil
-	case "gemini":
-		return NewGeminiClient(cfg), nil
-	case "openai":
-		return NewOpenAIClient(cfg), nil
-	default:
-		return nil, fmt.Errorf("unknown llm_provider: %q (valid: claude, gemini, openai)", cfg.LLMProvider)
-	}
 }

@@ -3,11 +3,13 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+
+	"managed-agent/llm"
 )
 
 // ToolDefinitions returns the tool schemas for Claude.
-func ToolDefinitions(hasSkills bool) []ClaudeTool {
-	tools := []ClaudeTool{
+func ToolDefinitions(hasSkills bool) []llm.ClaudeTool {
+	tools := []llm.ClaudeTool{
 		{
 			Name:        "execute_command",
 			Description: "在 Linux 沙箱中执行 shell 命令。可用于运行代码、安装依赖、查看文件等。",
@@ -164,7 +166,7 @@ func ToolDefinitions(hasSkills bool) []ClaudeTool {
 	}
 
 	// File download - always available
-	tools = append(tools, ClaudeTool{
+	tools = append(tools, llm.ClaudeTool{
 		Name:        "download_file",
 		Description: "生成沙箱文件的下载链接，用户可通过浏览器下载。适用于生成的文档、图片、压缩包等需要交付给用户的文件。",
 		InputSchema: json.RawMessage(`{
@@ -177,7 +179,7 @@ func ToolDefinitions(hasSkills bool) []ClaudeTool {
 	})
 
 	if hasSkills {
-		tools = append(tools, ClaudeTool{
+		tools = append(tools, llm.ClaudeTool{
 			Name:        "skill",
 			Description: "管理 Skills。activate=激活一个 skill 获得专门工作流指导，deactivate=停用一个 skill，list=查看所有可用 skill。",
 			InputSchema: json.RawMessage(`{

@@ -1,4 +1,4 @@
-package main
+package llm
 
 import (
 	"bufio"
@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 )
 
@@ -19,18 +18,12 @@ type GeminiClient struct {
 	MaxTokens int
 }
 
-func NewGeminiClient(cfg *Config) *GeminiClient {
-	maxTokens := 8192
-	if cfg.LLMMaxTokens != "" {
-		if v, err := strconv.Atoi(cfg.LLMMaxTokens); err == nil && v > 0 {
-			maxTokens = v
-		}
-	}
+func newGeminiClient(cfg Config) *GeminiClient {
 	return &GeminiClient{
-		BaseURL:   cfg.LLMBaseURL,
-		APIKey:    cfg.LLMAPIKey,
-		Model:     cfg.LLMModel,
-		MaxTokens: maxTokens,
+		BaseURL:   cfg.BaseURL,
+		APIKey:    cfg.APIKey,
+		Model:     cfg.Model,
+		MaxTokens: cfg.MaxTokens,
 	}
 }
 
@@ -77,8 +70,6 @@ type geminiRequest struct {
 type geminiGenConfig struct {
 	MaxOutputTokens int `json:"maxOutputTokens"`
 }
-
-// --- Gemini SSE response types ---
 
 type geminiSSEChunk struct {
 	Candidates []geminiCandidate `json:"candidates"`
@@ -168,7 +159,6 @@ func (c *GeminiClient) CallStream(system string, messages []ClaudeMessage, tools
 	if len(tools) > 0 {
 		var decls []geminiFuncDecl
 		for _, t := range tools {
-			// Rewrite input_schema to parameters with uppercase types
 			params := rewriteSchemaTypes(t.InputSchema)
 			decls = append(decls, geminiFuncDecl{
 				Name:        t.Name,
@@ -179,7 +169,6 @@ func (c *GeminiClient) CallStream(system string, messages []ClaudeMessage, tools
 		gemTools = []geminiTool{{FunctionDeclarations: decls}}
 	}
 
-	// Build request
 	reqBody := geminiRequest{
 		Contents:         contents,
 		Tools:            gemTools,
@@ -215,7 +204,6 @@ func (c *GeminiClient) CallStream(system string, messages []ClaudeMessage, tools
 		return nil, fmt.Errorf("gemini API error, status=%d, body=%s", resp.StatusCode, string(body))
 	}
 
-	// Parse SSE stream
 	result := &ClaudeResponse{StopReason: "end_turn"}
 	var textBuf strings.Builder
 	toolIndex := 0
@@ -279,12 +267,8 @@ func (c *GeminiClient) CallStream(system string, messages []ClaudeMessage, tools
 		return nil, fmt.Errorf("gemini stream read error: %w", err)
 	}
 
-	// Assemble content blocks
 	if textBuf.Len() > 0 {
-		result.Content = append(result.Content, ContentBlock{
-			Type: "text",
-			Text: textBuf.String(),
-		})
+		result.Content = append(result.Content, ContentBlock{Type: "text", Text: textBuf.String()})
 	}
 	result.Content = append(result.Content, toolBlocks...)
 	if len(toolBlocks) > 0 {
@@ -294,8 +278,8 @@ func (c *GeminiClient) CallStream(system string, messages []ClaudeMessage, tools
 	return result, nil
 }
 
-// rewriteSchemaTypes converts an Anthropic input_schema JSON to Gemini parameters
-// format, uppercasing the "type" field values (e.g. "object" -> "OBJECT").
+// rewriteSchemaTypes uppercases "type" values in a JSON schema for Gemini
+// (e.g. "object" -> "OBJECT").
 func rewriteSchemaTypes(raw json.RawMessage) json.RawMessage {
 	var obj interface{}
 	if err := json.Unmarshal(raw, &obj); err != nil {

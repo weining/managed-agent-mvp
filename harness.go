@@ -6,6 +6,8 @@ import (
 	"log"
 	"path/filepath"
 	"strings"
+
+	"managed-agent/llm"
 )
 
 const (
@@ -92,7 +94,7 @@ type SSEWriter interface {
 type AgentDeps struct {
 	Store   *SessionStore
 	Sandbox *SDKSandboxClient
-	Claude  LLMClient
+	Claude  llm.LLMClient
 	Skills  *SkillRegistry
 }
 
@@ -165,7 +167,7 @@ func RunAgent(deps *AgentDeps, sess *Session, userMsg string, sse SSEWriter) err
 
 		// 4. Process response content blocks
 		hasToolUse := false
-		var toolResults []ContentBlock
+		var toolResults []llm.ContentBlock
 
 		for _, block := range resp.Content {
 			switch block.Type {
@@ -217,7 +219,7 @@ func RunAgent(deps *AgentDeps, sess *Session, userMsg string, sse SSEWriter) err
 					},
 				})
 
-				toolResults = append(toolResults, ContentBlock{
+				toolResults = append(toolResults, llm.ContentBlock{
 					Type:      "tool_result",
 					ToolUseID: block.ID,
 					Content:   output,
@@ -395,14 +397,14 @@ func isExecutable(relPath string) bool {
 }
 
 // buildMessages converts session events into Claude message format.
-func buildMessages(events []Event) []ClaudeMessage {
-	var messages []ClaudeMessage
-	var pendingAssistant []ContentBlock
-	var pendingToolResults []ContentBlock
+func buildMessages(events []Event) []llm.ClaudeMessage {
+	var messages []llm.ClaudeMessage
+	var pendingAssistant []llm.ContentBlock
+	var pendingToolResults []llm.ContentBlock
 
 	flushAssistant := func() {
 		if len(pendingAssistant) > 0 {
-			messages = append(messages, ClaudeMessage{
+			messages = append(messages, llm.ClaudeMessage{
 				Role:    "assistant",
 				Content: pendingAssistant,
 			})
@@ -412,7 +414,7 @@ func buildMessages(events []Event) []ClaudeMessage {
 
 	flushToolResults := func() {
 		if len(pendingToolResults) > 0 {
-			messages = append(messages, ClaudeMessage{
+			messages = append(messages, llm.ClaudeMessage{
 				Role:    "user",
 				Content: pendingToolResults,
 			})
@@ -426,9 +428,9 @@ func buildMessages(events []Event) []ClaudeMessage {
 			flushAssistant()
 			flushToolResults()
 			text, _ := evt.Content.(string)
-			messages = append(messages, ClaudeMessage{
+			messages = append(messages, llm.ClaudeMessage{
 				Role: "user",
-				Content: []ContentBlock{
+				Content: []llm.ContentBlock{
 					{Type: "text", Text: text},
 				},
 			})
@@ -436,7 +438,7 @@ func buildMessages(events []Event) []ClaudeMessage {
 		case "assistant_message":
 			flushToolResults()
 			text, _ := evt.Content.(string)
-			pendingAssistant = append(pendingAssistant, ContentBlock{
+			pendingAssistant = append(pendingAssistant, llm.ContentBlock{
 				Type: "text",
 				Text: text,
 			})
@@ -447,7 +449,7 @@ func buildMessages(events []Event) []ClaudeMessage {
 			id, _ := m["id"].(string)
 			name, _ := m["name"].(string)
 			input := m["input"]
-			pendingAssistant = append(pendingAssistant, ContentBlock{
+			pendingAssistant = append(pendingAssistant, llm.ContentBlock{
 				Type:  "tool_use",
 				ID:    id,
 				Name:  name,
@@ -460,7 +462,7 @@ func buildMessages(events []Event) []ClaudeMessage {
 			toolUseID, _ := m["tool_use_id"].(string)
 			output, _ := m["output"].(string)
 			isError, _ := m["is_error"].(bool)
-			pendingToolResults = append(pendingToolResults, ContentBlock{
+			pendingToolResults = append(pendingToolResults, llm.ContentBlock{
 				Type:      "tool_result",
 				ToolUseID: toolUseID,
 				Content:   output,
@@ -477,8 +479,8 @@ func buildMessages(events []Event) []ClaudeMessage {
 // fixDanglingToolUse inserts synthetic tool_results when an assistant message
 // with tool_use is followed by a user message without tool_results.
 // This happens when a page refresh interrupts a running agent.
-func fixDanglingToolUse(messages []ClaudeMessage) []ClaudeMessage {
-	var fixed []ClaudeMessage
+func fixDanglingToolUse(messages []llm.ClaudeMessage) []llm.ClaudeMessage {
+	var fixed []llm.ClaudeMessage
 	for i, msg := range messages {
 		fixed = append(fixed, msg)
 
@@ -509,16 +511,16 @@ func fixDanglingToolUse(messages []ClaudeMessage) []ClaudeMessage {
 			continue
 		}
 		// Inject synthetic tool_results
-		var results []ContentBlock
+		var results []llm.ContentBlock
 		for _, id := range toolIDs {
-			results = append(results, ContentBlock{
+			results = append(results, llm.ContentBlock{
 				Type:      "tool_result",
 				ToolUseID: id,
 				Content:   "Tool execution was interrupted.",
 				IsError:   true,
 			})
 		}
-		fixed = append(fixed, ClaudeMessage{
+		fixed = append(fixed, llm.ClaudeMessage{
 			Role:    "user",
 			Content: results,
 		})

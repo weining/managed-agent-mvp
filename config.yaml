@@ -4,9 +4,9 @@
 # All fields are optional — defaults are used when not specified.
 
 # ── LLM ──────────────────────────────────────────────
-# llm_provider: claude   # 可选: claude（默认）/ gemini / openai
+llm_provider: claude    # 可选: claude（默认）/ gemini / openai
 llm_base_url: https://oneapi-comate.baidu-int.com
-llm_api_key: Your-OneApi-Key
+llm_api_key: sk-hGpOvDfa4VHM1qPh82Ff522525F54c3f80656e5fB3E3E859
 llm_model: Claude Sonnet 4.6
 llm_max_tokens: 8192
 
@@ -15,7 +15,7 @@ llm_max_tokens: 8192
 # llm_custom_header: {"agentId": "ducc:user:yourname", "username": "yourname", "repo": "", "source": "ducc"}
 
 # ── Sandbox ──────────────────────────────────────────
-sandbox_base_url: https://8080-t6nk21b8.agent-sandbox.baidu-int.com
+sandbox_base_url: https://8080-qafxf88j.agent-sandbox.baidu-int.com
 sandbox_id: t6nk21b8
 
 # ── Server ───────────────────────────────────────────
