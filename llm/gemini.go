@@ -185,13 +185,14 @@ func (c *GeminiClient) CallStream(system string, messages []ClaudeMessage, tools
 		return nil, fmt.Errorf("failed to marshal gemini request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?key=%s&alt=sse",
-		c.BaseURL, c.Model, c.APIKey)
+	url := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse",
+		c.BaseURL, c.Model)
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gemini request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", c.APIKey)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
