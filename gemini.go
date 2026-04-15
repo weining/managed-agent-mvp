@@ -91,34 +91,75 @@ type geminiCandidate struct {
 
 // CallStream implements LLMClient.
 func (c *GeminiClient) CallStream(system string, messages []ClaudeMessage, tools []ClaudeTool, cb StreamCallback) (*ClaudeResponse, error) {
-	// Build contents from ClaudeMessages
+	// Build a map of tool-use ID -> function name from assistant messages,
+	// needed to populate functionResponse.name correctly (Gemini requires
+	// the original function name, not the synthetic tool-use ID).
+	toolIDToName := map[string]string{}
+	for _, msg := range messages {
+		if msg.Role == "assistant" {
+			for _, block := range msg.Content {
+				if block.Type == "tool_use" {
+					toolIDToName[block.ID] = block.Name
+				}
+			}
+		}
+	}
+
+	// Build contents from ClaudeMessages.
+	// Gemini requires that functionResponse parts and plain-text parts appear
+	// in separate content turns — mixing them in one turn is a protocol error.
 	var contents []geminiContent
 	for _, msg := range messages {
 		role := msg.Role
 		if role == "assistant" {
 			role = "model"
 		}
-		var parts []geminiPart
-		for _, block := range msg.Content {
-			switch block.Type {
-			case "text":
-				parts = append(parts, geminiPart{Text: block.Text})
-			case "tool_use":
-				args := toGeminiArgs(block.Input)
-				parts = append(parts, geminiPart{
-					FunctionCall: &geminiFunctionCall{Name: block.Name, Args: args},
-				})
-			case "tool_result":
-				parts = append(parts, geminiPart{
-					FunctionResp: &geminiFunctionResp{
-						Name:     block.ToolUseID,
-						Response: map[string]interface{}{"output": block.Content},
-					},
-				})
+
+		if role == "user" {
+			// Split into functionResponse parts and text parts so they end up
+			// in separate content turns (Gemini rejects mixed turns).
+			var funcRespParts []geminiPart
+			var textParts []geminiPart
+			for _, block := range msg.Content {
+				switch block.Type {
+				case "text":
+					textParts = append(textParts, geminiPart{Text: block.Text})
+				case "tool_result":
+					name := toolIDToName[block.ToolUseID]
+					if name == "" {
+						name = block.ToolUseID // fallback
+					}
+					funcRespParts = append(funcRespParts, geminiPart{
+						FunctionResp: &geminiFunctionResp{
+							Name:     name,
+							Response: map[string]interface{}{"output": block.Content},
+						},
+					})
+				}
 			}
-		}
-		if len(parts) > 0 {
-			contents = append(contents, geminiContent{Role: role, Parts: parts})
+			if len(funcRespParts) > 0 {
+				contents = append(contents, geminiContent{Role: "user", Parts: funcRespParts})
+			}
+			if len(textParts) > 0 {
+				contents = append(contents, geminiContent{Role: "user", Parts: textParts})
+			}
+		} else {
+			// model (assistant) turn
+			var parts []geminiPart
+			for _, block := range msg.Content {
+				switch block.Type {
+				case "text":
+					parts = append(parts, geminiPart{Text: block.Text})
+				case "tool_use":
+					args := toGeminiArgs(block.Input)
+					parts = append(parts, geminiPart{
+						FunctionCall: &geminiFunctionCall{Name: block.Name, Args: args},
+					})
+				}
+			}
+			if len(parts) > 0 {
+				contents = append(contents, geminiContent{Role: role, Parts: parts})
+			}
 		}
 	}
 
@@ -233,6 +274,9 @@ func (c *GeminiClient) CallStream(system string, messages []ClaudeMessage, tools
 				result.StopReason = strings.ToLower(cand.FinishReason)
 			}
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("gemini stream read error: %w", err)
 	}
 
 	// Assemble content blocks

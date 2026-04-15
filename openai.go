@@ -120,7 +120,9 @@ func (c *OpenAIClient) CallStream(system string, messages []ClaudeMessage, tools
 	for _, msg := range messages {
 		switch msg.Role {
 		case "user":
-			// Separate plain text blocks from tool_result blocks
+			// Separate plain text blocks from tool_result blocks.
+			// Tool results must appear before any new user text (OpenAI requires
+			// role=tool messages immediately after the assistant tool_calls message).
 			var textParts []string
 			var toolResults []ContentBlock
 			for _, block := range msg.Content {
@@ -130,17 +132,17 @@ func (c *OpenAIClient) CallStream(system string, messages []ClaudeMessage, tools
 					toolResults = append(toolResults, block)
 				}
 			}
-			if len(textParts) > 0 {
-				oaiMsgs = append(oaiMsgs, oaiMessage{
-					Role:    "user",
-					Content: strings.Join(textParts, "\n"),
-				})
-			}
 			for _, tr := range toolResults {
 				oaiMsgs = append(oaiMsgs, oaiMessage{
 					Role:       "tool",
 					ToolCallID: tr.ToolUseID,
 					Content:    tr.Content,
+				})
+			}
+			if len(textParts) > 0 {
+				oaiMsgs = append(oaiMsgs, oaiMessage{
+					Role:    "user",
+					Content: strings.Join(textParts, "\n"),
 				})
 			}
 
@@ -267,6 +269,9 @@ func (c *OpenAIClient) CallStream(system string, messages []ClaudeMessage, tools
 				result.StopReason = "tool_use"
 			}
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("openai stream read error: %w", err)
 	}
 
 	// Assemble content blocks
