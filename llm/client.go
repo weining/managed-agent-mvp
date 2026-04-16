@@ -113,6 +113,10 @@ type ContentBlock struct {
 
 	// gemini-specific: thought signature for tool_use blocks (required for replay)
 	ThoughtSignature string `json:"thought_signature,omitempty"`
+
+	// image content block
+	ImageMIMEType string `json:"image_mime_type,omitempty"` // e.g. "image/jpeg"
+	ImageData     string `json:"image_data,omitempty"`      // base64 encoded bytes
 }
 
 type ClaudeTool struct {
@@ -133,4 +137,32 @@ type ClaudeResponse struct {
 type Usage struct {
 	InputTokens  int `json:"input_tokens"`
 	OutputTokens int `json:"output_tokens"`
+}
+
+// MarshalJSON produces Anthropic-compatible JSON for image blocks.
+// For all other block types, the default struct marshaling is used.
+func (b ContentBlock) MarshalJSON() ([]byte, error) {
+	if b.Type == "image" {
+		return json.Marshal(struct {
+			Type   string `json:"type"`
+			Source struct {
+				Type      string `json:"type"`
+				MediaType string `json:"media_type"`
+				Data      string `json:"data"`
+			} `json:"source"`
+		}{
+			Type: "image",
+			Source: struct {
+				Type      string `json:"type"`
+				MediaType string `json:"media_type"`
+				Data      string `json:"data"`
+			}{
+				Type:      "base64",
+				MediaType: b.ImageMIMEType,
+				Data:      b.ImageData,
+			},
+		})
+	}
+	type alias ContentBlock // avoid infinite recursion
+	return json.Marshal(alias(b))
 }
