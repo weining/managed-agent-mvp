@@ -35,9 +35,11 @@ type geminiContent struct {
 }
 
 type geminiPart struct {
-	Text         string              `json:"text,omitempty"`
-	FunctionCall *geminiFunctionCall `json:"functionCall,omitempty"`
-	FunctionResp *geminiFunctionResp `json:"functionResponse,omitempty"`
+	Text             string              `json:"text,omitempty"`
+	FunctionCall     *geminiFunctionCall `json:"functionCall,omitempty"`
+	FunctionResp     *geminiFunctionResp `json:"functionResponse,omitempty"`
+	Thought          bool                `json:"thought,omitempty"`
+	ThoughtSignature string              `json:"thoughtSignature,omitempty"`
 }
 
 type geminiFunctionCall struct {
@@ -142,6 +144,15 @@ func (c *GeminiClient) CallStream(system string, messages []ClaudeMessage, tools
 				case "text":
 					parts = append(parts, geminiPart{Text: block.Text})
 				case "tool_use":
+					// If the original response included a thought signature, replay
+					// it as a thought part before the functionCall — Gemini requires
+					// this when thinking mode was active.
+					if block.ThoughtSignature != "" {
+						parts = append(parts, geminiPart{
+							Thought:          true,
+							ThoughtSignature: block.ThoughtSignature,
+						})
+					}
 					args := toGeminiArgs(block.Input)
 					parts = append(parts, geminiPart{
 						FunctionCall: &geminiFunctionCall{Name: block.Name, Args: args},
@@ -229,7 +240,13 @@ func (c *GeminiClient) CallStream(system string, messages []ClaudeMessage, tools
 		}
 
 		for _, cand := range chunk.Candidates {
+			var pendingThoughtSig string
 			for _, part := range cand.Content.Parts {
+				// Capture thought signature emitted before functionCall parts.
+				if part.Thought && part.ThoughtSignature != "" {
+					pendingThoughtSig = part.ThoughtSignature
+					continue
+				}
 				if part.Text != "" {
 					textBuf.WriteString(part.Text)
 					cb("text", part.Text)
@@ -252,11 +269,13 @@ func (c *GeminiClient) CallStream(system string, messages []ClaudeMessage, tools
 						"input": input,
 					})
 					toolBlocks = append(toolBlocks, ContentBlock{
-						Type:  "tool_use",
-						ID:    id,
-						Name:  part.FunctionCall.Name,
-						Input: input,
+						Type:             "tool_use",
+						ID:               id,
+						Name:             part.FunctionCall.Name,
+						Input:            input,
+						ThoughtSignature: pendingThoughtSig,
 					})
+					pendingThoughtSig = ""
 				}
 			}
 			if cand.FinishReason != "" && cand.FinishReason != "STOP" {

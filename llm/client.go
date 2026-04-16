@@ -78,6 +78,9 @@ type ContentBlock struct {
 
 	// thinking
 	Thinking string `json:"thinking,omitempty"`
+
+	// gemini-specific: thought signature for tool_use blocks (required for replay)
+	ThoughtSignature string `json:"thought_signature,omitempty"`
 }
 
 type ClaudeTool struct {
