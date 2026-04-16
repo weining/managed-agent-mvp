@@ -36,8 +36,14 @@ type geminiContent struct {
 	Parts []geminiPart `json:"parts"`
 }
 
+type geminiInlineData struct {
+	MIMEType string `json:"mimeType"`
+	Data     string `json:"data"` // base64
+}
+
 type geminiPart struct {
 	Text               string              `json:"text,omitempty"`
+	InlineData         *geminiInlineData   `json:"inlineData,omitempty"`
 	FunctionCall       *geminiFunctionCall `json:"functionCall,omitempty"`
 	FunctionResp       *geminiFunctionResp `json:"functionResponse,omitempty"`
 	ThoughtSignature   string              `json:"thoughtSignature,omitempty"`
@@ -130,6 +136,13 @@ func (c *GeminiClient) CallStream(system string, messages []ClaudeMessage, tools
 				switch block.Type {
 				case "text":
 					textParts = append(textParts, geminiPart{Text: block.Text})
+				case "image":
+					textParts = append(textParts, geminiPart{
+						InlineData: &geminiInlineData{
+							MIMEType: block.ImageMIMEType,
+							Data:     block.ImageData,
+						},
+					})
 				case "tool_result":
 					name := toolIDToName[block.ToolUseID]
 					if name == "" {
