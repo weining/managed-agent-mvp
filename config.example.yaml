@@ -1,22 +1,25 @@
-# Managed Agent Configuration
+# Managed Agent Configuration — Example
 #
-# Priority: environment variables > this file > defaults
+# Copy this file to config.yaml and fill in your values.
+# Priority: environment variables > config.yaml > defaults
 # All fields are optional — defaults are used when not specified.
 
 # ── LLM ──────────────────────────────────────────────
-llm_provider: claude    # 可选: claude（默认）/ gemini / openai
+# 可选: claude（默认）/ gemini / openai
+llm_provider: claude
 llm_base_url: https://oneapi-comate.baidu-int.com
-llm_api_key: sk-hGpOvDfa4VHM1qPh82Ff522525F54c3f80656e5fB3E3E859
+llm_api_key: sk-your-api-key-here
 llm_model: Claude Sonnet 4.6
 llm_max_tokens: 8192
+# llm_debug: true   # 打印完整 LLM 请求/响应（仅调试用）
 
 # Custom header for LLM API requests (JSON string, optional).
 # Example for internal Baidu OneAPI:
 # llm_custom_header: {"agentId": "ducc:user:yourname", "username": "yourname", "repo": "", "source": "ducc"}
 
 # ── Sandbox ──────────────────────────────────────────
-sandbox_base_url: https://8080-qafxf88j.agent-sandbox.baidu-int.com
-sandbox_id: t6nk21b8
+sandbox_base_url: https://8080-xxx.agent-sandbox.baidu-int.com
+sandbox_id: xxxxxxxx
 
 # ── Server ───────────────────────────────────────────
 listen_addr: :8080
@@ -24,3 +27,6 @@ listen_addr: :8080
 # ── Storage ──────────────────────────────────────────
 data_dir: data/sessions
 skills_dir: skills
+
+# ── Agent Behavior ───────────────────────────────────
+# max_loop_rounds: 50   # 每次请求最大工具调用轮数，默认 50

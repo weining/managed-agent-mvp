@@ -69,6 +69,7 @@ func main() {
 		Sandbox: sbx,
 		Claude:  llmClient,
 		Skills:  skills,
+		Config:  cfg,
 	}
 
 	// Setup routes and start server
@@ -78,4 +79,3 @@ func main() {
 		log.Fatalf("Server error: %v", err)
 	}
 }
-

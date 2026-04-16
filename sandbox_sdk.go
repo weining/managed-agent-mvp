@@ -33,8 +33,6 @@ func NewSDKSandboxClient(baseURL, sandboxID string) *SDKSandboxClient {
 // Init verifies connectivity.
 func (s *SDKSandboxClient) Init() error {
 	ctx := context.Background()
-	// Use a lightweight file listing to verify connectivity.
-	// Avoid Shell.ListSessions which has a time-parsing bug in the SDK.
 	_, err := s.client.File.ListPath(ctx, &api.FileListRequest{Path: "/"})
 	if err != nil {
 		return fmt.Errorf("failed to connect to sandbox SDK: %w", err)
@@ -93,93 +91,59 @@ func (s *SDKSandboxClient) ReadFile(path string) (string, error) {
 	return resp.Data.Content, nil
 }
 
-// --- #1: browse_web via shell (BrowserPage API not available on this sandbox) ---
+// --- #1: browse_web via BrowserPage SDK ---
 
 func (s *SDKSandboxClient) BrowseWebSDK(targetURL string) (string, error) {
-	// Use Python + CDP via heredoc to avoid quoting issues
-	script := fmt.Sprintf(`python3 << 'PYEOF'
-import json, time, urllib.request, websocket
+	ctx := context.Background()
 
-target_url = %q
-
-targets = json.loads(urllib.request.urlopen('http://localhost:9222/json').read())
-ws_url = next((t['webSocketDebuggerUrl'] for t in targets if t.get('type') == 'page'), None)
-if not ws_url:
-    print(json.dumps({'error': 'No browser page target'}))
-    exit(1)
-
-ws = websocket.create_connection(ws_url, timeout=30)
-_id = [0]
-def cdp(method, params=None):
-    _id[0] += 1
-    msg = {'id': _id[0], 'method': method}
-    if params: msg['params'] = params
-    ws.send(json.dumps(msg))
-    while True:
-        r = json.loads(ws.recv())
-        if r.get('id') == _id[0]: return r.get('result', {})
-
-cdp('Page.navigate', {'url': target_url})
-time.sleep(4)
-
-title = cdp('Runtime.evaluate', {'expression': 'document.title'}).get('result', {}).get('value', '')
-content = cdp('Runtime.evaluate', {'expression': 'document.body.innerText.substring(0, 12000)'}).get('result', {}).get('value', '')
-ws.close()
-print(json.dumps({'title': title, 'content': content}, ensure_ascii=False))
-PYEOF`, targetURL)
-
-	stdout, exitCode, err := s.ExecCommand(script)
+	// Navigate to the target URL
+	_, err := s.client.BrowserPage.Navigate(ctx, &api.NavigateRequest{Url: targetURL})
 	if err != nil {
-		return "", fmt.Errorf("browse_web failed: %w", err)
-	}
-	stdout = strings.TrimSpace(stdout)
-	if exitCode != 0 {
-		return "", fmt.Errorf("browse_web exit %d: %s", exitCode, stdout)
+		return "", fmt.Errorf("browse_web navigate failed: %w", err)
 	}
 
-	var result struct {
-		Title   string `json:"title"`
-		Content string `json:"content"`
-		Error   string `json:"error"`
-	}
-	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
-		return stdout, nil
-	}
-	if result.Error != "" {
-		return "", fmt.Errorf("browse_web error: %s", result.Error)
+	// Get page content as Markdown (uses Readability + Turndown for clean extraction)
+	mdResp, err := s.client.BrowserPage.GetMarkdown(ctx)
+	if err != nil {
+		// Fallback to plain text if Markdown fails
+		textResp, textErr := s.client.BrowserPage.GetText(ctx)
+		if textErr != nil {
+			return "", fmt.Errorf("browse_web content extraction failed: %w", err)
+		}
+		if textResp.Data != nil && *textResp.Data != "" {
+			return fmt.Sprintf("URL: %s\n\n%s", targetURL, *textResp.Data), nil
+		}
+		return "", fmt.Errorf("browse_web: no content retrieved")
 	}
 
 	var sb strings.Builder
-	if result.Title != "" {
-		fmt.Fprintf(&sb, "Title: %s\n", result.Title)
+	fmt.Fprintf(&sb, "URL: %s\n\n", targetURL)
+	if mdResp.Data != nil {
+		if title, ok := mdResp.Data["title"].(string); ok && title != "" {
+			fmt.Fprintf(&sb, "Title: %s\n\n", title)
+		}
+		if content, ok := mdResp.Data["content"].(string); ok {
+			sb.WriteString(content)
+		} else {
+			data, _ := json.MarshalIndent(mdResp.Data, "", "  ")
+			sb.Write(data)
+		}
 	}
-	fmt.Fprintf(&sb, "URL: %s\n\n%s", targetURL, result.Content)
 	return sb.String(), nil
 }
 
-// --- #1: take_screenshot via SDK (Browser.Screenshot is available) ---
+// --- #1: take_screenshot via BrowserPage SDK ---
 
 func (s *SDKSandboxClient) TakeScreenshotSDK(targetURL string) (string, error) {
 	ctx := context.Background()
 
-	// Navigate via CDP if URL is provided
+	// Navigate if URL provided
 	if targetURL != "" {
-		script := fmt.Sprintf(`python3 << 'PYEOF'
-import json, time, urllib.request, websocket
-target_url = %q
-targets = json.loads(urllib.request.urlopen('http://localhost:9222/json').read())
-ws_url = next((t['webSocketDebuggerUrl'] for t in targets if t.get('type') == 'page'), None)
-if not ws_url: exit(1)
-ws = websocket.create_connection(ws_url, timeout=30)
-ws.send(json.dumps({'id':1,'method':'Page.navigate','params':{'url':target_url}}))
-ws.recv()
-time.sleep(3)
-ws.close()
-PYEOF`, targetURL)
-		s.ExecCommand(script)
+		if _, err := s.client.BrowserPage.Navigate(ctx, &api.NavigateRequest{Url: targetURL}); err != nil {
+			return "", fmt.Errorf("screenshot navigate failed: %w", err)
+		}
 	}
 
-	// Use the working /v1/browser/screenshot endpoint
 	reader, err := s.client.Browser.Screenshot(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to take screenshot: %w", err)
@@ -233,7 +197,6 @@ func (s *SDKSandboxClient) McpListTools(serverName string) (string, error) {
 
 func (s *SDKSandboxClient) McpCallTool(serverName, toolName string, args map[string]interface{}) (string, error) {
 	ctx := context.Background()
-	// Convert map[string]interface{} to map[string]any (same type, just explicit)
 	resp, err := s.client.Mcp.ExecuteMcpTool(ctx, serverName, toolName, args)
 	if err != nil {
 		return "", fmt.Errorf("failed to call MCP tool %s/%s: %w", serverName, toolName, err)
@@ -242,7 +205,6 @@ func (s *SDKSandboxClient) McpCallTool(serverName, toolName string, args map[str
 		return "MCP tool returned no result.", nil
 	}
 	if resp.Data.IsError != nil && *resp.Data.IsError {
-		// Extract error text from content
 		for _, item := range resp.Data.Content {
 			if item.Text != nil {
 				return item.Text.Text, fmt.Errorf("MCP tool error: %s", item.Text.Text)
@@ -250,7 +212,6 @@ func (s *SDKSandboxClient) McpCallTool(serverName, toolName string, args map[str
 		}
 		return "MCP tool returned an error.", fmt.Errorf("MCP tool returned an error")
 	}
-	// Collect text content
 	var sb strings.Builder
 	for _, item := range resp.Data.Content {
 		if item.Text != nil {
@@ -261,7 +222,6 @@ func (s *SDKSandboxClient) McpCallTool(serverName, toolName string, args map[str
 	if sb.Len() > 0 {
 		return strings.TrimSpace(sb.String()), nil
 	}
-	// Fallback: serialize structured content
 	if resp.Data.StructuredContent != nil {
 		data, _ := json.MarshalIndent(resp.Data.StructuredContent, "", "  ")
 		return string(data), nil
@@ -270,135 +230,132 @@ func (s *SDKSandboxClient) McpCallTool(serverName, toolName string, args map[str
 	return string(data), nil
 }
 
-// --- #3: Browser interaction via CDP shell commands ---
-// BrowserPage API (/v1/browser/page/*) is not available on this sandbox version.
-// Use CDP via Python websocket scripts as fallback.
+// --- #3: Browser interaction via BrowserPage SDK ---
 
 func (s *SDKSandboxClient) BrowserClick(selector string, index *int, x, y *float64) (string, error) {
-	if x != nil && y != nil {
-		script := fmt.Sprintf(`python3 << 'PYEOF'
-import json, urllib.request, websocket
-targets = json.loads(urllib.request.urlopen('http://localhost:9222/json').read())
-ws_url = next((t['webSocketDebuggerUrl'] for t in targets if t.get('type') == 'page'), None)
-if not ws_url: print('Error: No browser page'); exit(1)
-ws = websocket.create_connection(ws_url, timeout=10)
-def cdp(mid, method, params=None):
-    msg = {'id': mid, 'method': method}
-    if params: msg['params'] = params
-    ws.send(json.dumps(msg))
-    while True:
-        r = json.loads(ws.recv())
-        if r.get('id') == mid: return r.get('result', {})
-cdp(1, 'Input.dispatchMouseEvent', {'type':'mousePressed','x':%.1f,'y':%.1f,'button':'left','clickCount':1})
-cdp(2, 'Input.dispatchMouseEvent', {'type':'mouseReleased','x':%.1f,'y':%.1f,'button':'left','clickCount':1})
-ws.close()
-print('Clicked at (%.1f, %.1f)')
-PYEOF`, *x, *y, *x, *y, *x, *y)
-		stdout, _, err := s.ExecCommand(script)
-		if err != nil {
-			return "", fmt.Errorf("click failed: %w", err)
-		}
-		return strings.TrimSpace(stdout), nil
-	}
+	ctx := context.Background()
+	req := &api.ClickRequest{}
 	if selector != "" {
-		js := fmt.Sprintf(`document.querySelector(%q).click(); "clicked"`, selector)
-		return s.BrowserEvaluate(js)
+		req.Selector = &selector
 	}
-	return "", fmt.Errorf("provide selector or x/y coordinates for click")
+	if index != nil {
+		req.Index = index
+	}
+	if x != nil {
+		req.X = x
+	}
+	if y != nil {
+		req.Y = y
+	}
+	if _, err := s.client.BrowserPage.Click(ctx, req); err != nil {
+		return "", fmt.Errorf("click failed: %w", err)
+	}
+	return "Clicked successfully.", nil
 }
 
 func (s *SDKSandboxClient) BrowserFill(selector string, index *int, text string) (string, error) {
-	if selector == "" {
-		return "", fmt.Errorf("selector is required for fill")
+	ctx := context.Background()
+	req := &api.FillRequest{Text: text}
+	if selector != "" {
+		req.Selector = &selector
 	}
-	js := fmt.Sprintf(`(function(){var el=document.querySelector('%s');if(!el)return 'Element not found';el.focus();el.value=%q;el.dispatchEvent(new Event('input',{bubbles:true}));return 'Filled'})()`, selector, text)
-	return s.BrowserEvaluate(js)
+	if index != nil {
+		req.Index = index
+	}
+	if _, err := s.client.BrowserPage.Fill(ctx, req); err != nil {
+		return "", fmt.Errorf("fill failed: %w", err)
+	}
+	return "Filled successfully.", nil
 }
 
 func (s *SDKSandboxClient) BrowserEvaluate(expression string) (string, error) {
-	// Write the expression to a temp file to avoid all quoting issues
-	tmpPath := fmt.Sprintf("/tmp/_eval_%d.py", time.Now().UnixNano())
-	pyCode := fmt.Sprintf(`import json, urllib.request, websocket, sys
-targets = json.loads(urllib.request.urlopen('http://localhost:9222/json').read())
-ws_url = next((t['webSocketDebuggerUrl'] for t in targets if t.get('type') == 'page'), None)
-if not ws_url: print('Error: No browser page'); sys.exit(1)
-ws = websocket.create_connection(ws_url, timeout=15)
-expr = %q
-ws.send(json.dumps({'id':1,'method':'Runtime.evaluate','params':{'expression':expr,'returnByValue':True}}))
-while True:
-    r = json.loads(ws.recv())
-    if r.get('id') == 1:
-        result = r.get('result',{}).get('result',{})
-        if 'value' in result:
-            v = result['value']
-            print(json.dumps(v, ensure_ascii=False, default=str) if not isinstance(v, str) else v)
-        elif result.get('type') == 'undefined':
-            print('undefined')
-        else:
-            print(json.dumps(result, ensure_ascii=False))
-        break
-ws.close()
-`, expression)
-
-	if err := s.WriteFile(tmpPath, pyCode); err != nil {
-		return "", fmt.Errorf("evaluate: failed to write script: %w", err)
-	}
-	stdout, _, err := s.ExecCommand("python3 " + tmpPath)
+	ctx := context.Background()
+	resp, err := s.client.BrowserPage.Evaluate(ctx, &api.EvaluateRequest{Expression: expression})
 	if err != nil {
 		return "", fmt.Errorf("evaluate failed: %w", err)
 	}
-	return strings.TrimSpace(stdout), nil
+	if resp == nil || resp.Data == nil {
+		return "undefined", nil
+	}
+	switch v := resp.Data.(type) {
+	case string:
+		return v, nil
+	default:
+		data, _ := json.Marshal(v)
+		return string(data), nil
+	}
 }
 
 func (s *SDKSandboxClient) BrowserGetElements() (string, error) {
-	js := `(function(){
-var els=document.querySelectorAll('a,button,input,select,textarea,[role=button],[onclick]');
-var result=[];
-for(var i=0;i<Math.min(els.length,50);i++){
-  var el=els[i];
-  var r=el.getBoundingClientRect();
-  result.push({tag:el.tagName,type:el.type||'',text:(el.innerText||el.value||'').substring(0,80),
-    selector:el.id?'#'+el.id:(el.className?el.tagName.toLowerCase()+'.'+el.className.split(' ')[0]:''),
-    rect:{x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)}});
-}
-return JSON.stringify(result)})()` // nolint
-	result, err := s.BrowserEvaluate(js)
+	ctx := context.Background()
+	resp, err := s.client.BrowserPage.GetElements(ctx)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("get_elements failed: %w", err)
 	}
-	return result, nil
+	if resp == nil || len(resp.Data) == 0 {
+		return "No interactive elements found.", nil
+	}
+	data, _ := json.MarshalIndent(resp.Data, "", "  ")
+	return string(data), nil
 }
 
 func (s *SDKSandboxClient) BrowserScroll(direction string, amount *int) (string, error) {
-	pixels := 300
+	ctx := context.Background()
+	req := &api.ScrollRequest{}
+	if direction != "" {
+		req.Direction = &direction
+	}
 	if amount != nil {
-		pixels = *amount * 100
+		req.Amount = amount
 	}
-	var js string
-	switch direction {
-	case "down":
-		js = fmt.Sprintf("window.scrollBy(0,%d);'scrolled down'", pixels)
-	case "up":
-		js = fmt.Sprintf("window.scrollBy(0,-%d);'scrolled up'", pixels)
-	case "left":
-		js = fmt.Sprintf("window.scrollBy(-%d,0);'scrolled left'", pixels)
-	case "right":
-		js = fmt.Sprintf("window.scrollBy(%d,0);'scrolled right'", pixels)
-	default:
-		js = fmt.Sprintf("window.scrollBy(0,%d);'scrolled down'", pixels)
+	if _, err := s.client.BrowserPage.Scroll(ctx, req); err != nil {
+		return "", fmt.Errorf("scroll failed: %w", err)
 	}
-	return s.BrowserEvaluate(js)
+	return fmt.Sprintf("Scrolled %s.", direction), nil
 }
 
 func (s *SDKSandboxClient) BrowserGetConsole() (string, error) {
-	// Console logs require persistent monitoring; provide recent via JS
-	js := `(function(){
-if(!window.__consoleLogs){window.__consoleLogs=[];
-var orig=console.log;console.log=function(){window.__consoleLogs.push(Array.from(arguments).join(' '));orig.apply(console,arguments)};
-var origE=console.error;console.error=function(){window.__consoleLogs.push('[ERROR] '+Array.from(arguments).join(' '));origE.apply(console,arguments)};
-return 'Console capture started. Call get_console again to see logs.'}
-return JSON.stringify(window.__consoleLogs.slice(-20))})()` // nolint
-	return s.BrowserEvaluate(js)
+	ctx := context.Background()
+	resp, err := s.client.BrowserPage.GetConsole(ctx, &api.BrowserPageGetConsoleRequest{})
+	if err != nil {
+		return "", fmt.Errorf("get_console failed: %w", err)
+	}
+	if resp == nil || len(resp.Data) == 0 {
+		return "No console logs.", nil
+	}
+	data, _ := json.MarshalIndent(resp.Data, "", "  ")
+	return string(data), nil
+}
+
+// BrowserTypeText types text into the currently focused element.
+func (s *SDKSandboxClient) BrowserTypeText(text string, delay *float64) (string, error) {
+	ctx := context.Background()
+	req := &api.TypeTextRequest{Text: text}
+	if delay != nil {
+		req.Delay = delay
+	}
+	if _, err := s.client.BrowserPage.TypeText(ctx, req); err != nil {
+		return "", fmt.Errorf("type_text failed: %w", err)
+	}
+	return "Text typed successfully.", nil
+}
+
+// BrowserPressKey presses a single keyboard key (e.g. "Enter", "Tab", "Escape").
+func (s *SDKSandboxClient) BrowserPressKey(key string) (string, error) {
+	ctx := context.Background()
+	if _, err := s.client.BrowserPage.PressKey(ctx, &api.KeyRequest{Key: key}); err != nil {
+		return "", fmt.Errorf("press_key failed: %w", err)
+	}
+	return fmt.Sprintf("Key pressed: %s", key), nil
+}
+
+// BrowserNavigate navigates the browser to the specified URL.
+func (s *SDKSandboxClient) BrowserNavigate(targetURL string) (string, error) {
+	ctx := context.Background()
+	if _, err := s.client.BrowserPage.Navigate(ctx, &api.NavigateRequest{Url: targetURL}); err != nil {
+		return "", fmt.Errorf("navigate failed: %w", err)
+	}
+	return fmt.Sprintf("Navigated to: %s", targetURL), nil
 }
 
 // --- #4: Code execution ---
@@ -516,6 +473,92 @@ func (s *SDKSandboxClient) FileFind(path, glob string) (string, error) {
 		return "No files found.", nil
 	}
 	return strings.Join(resp.Data.Files, "\n"), nil
+}
+
+// FileListPath lists the contents of a directory.
+func (s *SDKSandboxClient) FileListPath(path string, recursive bool, showHidden bool, maxDepth *int) (string, error) {
+	ctx := context.Background()
+	req := &api.FileListRequest{
+		Path:        path,
+		IncludeSize: api.Bool(true),
+	}
+	if recursive {
+		req.Recursive = api.Bool(true)
+	}
+	if showHidden {
+		req.ShowHidden = api.Bool(true)
+	}
+	if maxDepth != nil {
+		req.MaxDepth = maxDepth
+	}
+
+	resp, err := s.client.File.ListPath(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("list failed: %w", err)
+	}
+	if resp.Data == nil {
+		return "Empty directory.", nil
+	}
+	data, _ := json.MarshalIndent(resp.Data, "", "  ")
+	return string(data), nil
+}
+
+// FileStrReplaceEditor performs precise file editing using the StrReplaceEditor API.
+// Supports: view, str_replace, create, insert, undo_edit.
+func (s *SDKSandboxClient) FileStrReplaceEditor(command, path string, opts map[string]interface{}) (string, error) {
+	ctx := context.Background()
+
+	var cmd api.Command
+	switch command {
+	case "view":
+		cmd = api.CommandView
+	case "str_replace":
+		cmd = api.CommandStrReplace
+	case "create":
+		cmd = api.CommandCreate
+	case "insert":
+		cmd = api.CommandInsert
+	case "undo_edit":
+		cmd = api.CommandUndoEdit
+	default:
+		return "", fmt.Errorf("invalid command: %s (use view/str_replace/create/insert/undo_edit)", command)
+	}
+
+	req := &api.StrReplaceEditorRequest{
+		Command: cmd,
+		Path:    path,
+	}
+
+	if v, ok := opts["old_str"].(string); ok {
+		req.OldStr = &v
+	}
+	if v, ok := opts["new_str"].(string); ok {
+		req.NewStr = &v
+	}
+	if v, ok := opts["file_text"].(string); ok {
+		req.FileText = &v
+	}
+	if v, ok := opts["insert_line"].(float64); ok {
+		n := int(v)
+		req.InsertLine = &n
+	}
+	if v, ok := opts["view_range"].([]interface{}); ok && len(v) == 2 {
+		if start, ok := v[0].(float64); ok {
+			if end, ok := v[1].(float64); ok {
+				req.ViewRange = []int{int(start), int(end)}
+			}
+		}
+	}
+
+	resp, err := s.client.File.StrReplaceEditor(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("file_edit %s failed: %w", command, err)
+	}
+	if resp.Data == nil {
+		return "OK", nil
+	}
+	data, _ := json.MarshalIndent(resp.Data, "", "  ")
+	return string(data), nil
 }
 
 // --- #6: Shell sessions ---

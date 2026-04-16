@@ -29,6 +29,9 @@ type Config struct {
 	// Storage
 	DataDir   string `json:"data_dir"`
 	SkillsDir string `json:"skills_dir"`
+
+	// Agent behavior
+	MaxLoopRounds string `json:"max_loop_rounds"` // max tool-use iterations per request, default "50"
 }
 
 // DefaultConfig returns configuration with default values.
@@ -43,6 +46,7 @@ func DefaultConfig() *Config {
 		ListenAddr:     ":8080",
 		DataDir:        "data/sessions",
 		SkillsDir:      "skills",
+		MaxLoopRounds:  "50",
 	}
 }
 
@@ -83,6 +87,7 @@ func (c *Config) applyEnv() {
 	envOverride(&c.ListenAddr, "LISTEN_ADDR")
 	envOverride(&c.DataDir, "DATA_DIR")
 	envOverride(&c.SkillsDir, "SKILLS_DIR")
+	envOverride(&c.MaxLoopRounds, "MAX_LOOP_ROUNDS")
 }
 
 func envOverride(target *string, key string) {
@@ -139,6 +144,7 @@ func (c *Config) fieldMap() map[string]*string {
 		"listen_addr":       &c.ListenAddr,
 		"data_dir":          &c.DataDir,
 		"skills_dir":        &c.SkillsDir,
+		"max_loop_rounds":   &c.MaxLoopRounds,
 	}
 }
 

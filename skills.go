@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -185,7 +186,7 @@ func (r *SkillRegistry) Get(name string) *Skill {
 	return r.skills[name]
 }
 
-// List returns all loaded skills.
+// List returns all loaded skills sorted by name.
 func (r *SkillRegistry) List() []*Skill {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -194,10 +195,11 @@ func (r *SkillRegistry) List() []*Skill {
 	for _, s := range r.skills {
 		out = append(out, s)
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 
-// ListUserInvocable returns skills that users can trigger via /name.
+// ListUserInvocable returns skills that users can trigger via /name, sorted by name.
 func (r *SkillRegistry) ListUserInvocable() []*Skill {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -208,10 +210,11 @@ func (r *SkillRegistry) ListUserInvocable() []*Skill {
 			out = append(out, s)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 
-// ListModelInvocable returns skills that the model can auto-activate.
+// ListModelInvocable returns skills that the model can auto-activate, sorted by name.
 func (r *SkillRegistry) ListModelInvocable() []*Skill {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -222,6 +225,7 @@ func (r *SkillRegistry) ListModelInvocable() []*Skill {
 			out = append(out, s)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 
@@ -235,11 +239,11 @@ func (r *SkillRegistry) SkillSummary() string {
 
 	var sb strings.Builder
 	sb.WriteString("\n\n## 可用 Skills\n")
-	sb.WriteString("通过 skill 工具 (action=activate) 激活后，你将获得该 skill 的专门工作流指导。\n\n")
+	sb.WriteString("当用户意图匹配某个 skill 的触发场景时，**第一步必须先调用 skill 工具 (action=activate)** 激活该 skill，再按其指导执行。\n\n")
 	for _, s := range skills {
 		fmt.Fprintf(&sb, "- **%s**: %s", s.Name, s.Description)
 		if s.Trigger != "" {
-			fmt.Fprintf(&sb, " (触发场景: %s)", s.Trigger)
+			fmt.Fprintf(&sb, "（触发场景：%s）", s.Trigger)
 		}
 		if s.HasFiles() {
 			fmt.Fprintf(&sb, " [含 %d 个文件]", len(s.Files))
@@ -264,7 +268,7 @@ func (r *SkillRegistry) ActiveSkillsPrompt(active []string, args map[string]stri
 		}
 
 		prompt := s.ResolvePrompt(args[name])
-		fmt.Fprintf(&sb, "\n\n---\n## [Active Skill: %s]\n%s", s.Name, prompt)
+		fmt.Fprintf(&sb, "\n\n════════════════════════════════════════\n## [激活的 Skill: %s]\n以下是该 skill 的完整工作流指导，**必须严格遵守**：\n\n%s", s.Name, prompt)
 
 		if s.HasFiles() {
 			sandboxDir := s.SandboxDir()
@@ -273,6 +277,7 @@ func (r *SkillRegistry) ActiveSkillsPrompt(active []string, args map[string]stri
 				fmt.Fprintf(&sb, "- `%s/%s`\n", sandboxDir, f.RelPath)
 			}
 		}
+		sb.WriteString("\n════════════════════════════════════════")
 	}
 	return sb.String()
 }

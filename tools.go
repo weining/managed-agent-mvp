@@ -12,7 +12,7 @@ func ToolDefinitions(hasSkills bool) []llm.ClaudeTool {
 	tools := []llm.ClaudeTool{
 		{
 			Name:        "execute_command",
-			Description: "在 Linux 沙箱中执行 shell 命令。可用于运行代码、安装依赖、查看文件等。",
+			Description: "在 Linux 沙箱中执行 shell 命令。适合运行代码、安装依赖、短时操作。注意：超过 30 秒的长时运行任务（如启动服务器）请改用 shell_session。",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
 				"properties": {
@@ -62,14 +62,13 @@ func ToolDefinitions(hasSkills bool) []llm.ClaudeTool {
 				"type": "object",
 				"properties": {
 					"url": {"type": "string", "description": "要截图的网页 URL（可选，不提供则截当前页面）"}
-				},
-				"required": []
+				}
 			}`),
 		},
 		// #2: MCP 工具
 		{
 			Name:        "mcp_tool",
-			Description: "发现和调用沙箱中的 MCP 服务器工具。支持列出服务器、列出工具、调用工具三种操作。",
+			Description: "发现和调用沙箱中的 MCP 服务器工具。必须按顺序操作：先 list_servers 发现可用服务器，再 list_tools 查看该服务器的工具列表，最后 call_tool 调用具体工具。禁止跳过发现步骤直接猜测服务器或工具名。",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
 				"properties": {
@@ -84,14 +83,16 @@ func ToolDefinitions(hasSkills bool) []llm.ClaudeTool {
 		// #3: 浏览器交互
 		{
 			Name:        "browser_action",
-			Description: "与沙箱浏览器交互。支持点击、填写、执行JS、获取元素列表、滚动、查看控制台日志等操作。",
+			Description: "与沙箱浏览器交互。navigate=导航到URL，click=点击元素，fill=填写输入框，type_text=逐字符输入，press_key=按键（Enter/Tab等），evaluate=执行JS，get_elements=获取可交互元素列表，scroll=滚动页面，get_console=查看控制台日志。",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
 				"properties": {
-					"action":     {"type": "string", "enum": ["click", "fill", "evaluate", "get_elements", "scroll", "get_console"], "description": "操作类型"},
+					"action":     {"type": "string", "enum": ["navigate", "click", "fill", "type_text", "press_key", "evaluate", "get_elements", "scroll", "get_console"], "description": "操作类型"},
+					"url":        {"type": "string", "description": "目标 URL（navigate 时必需）"},
 					"selector":   {"type": "string", "description": "CSS 选择器（click/fill 时使用）"},
 					"index":      {"type": "integer", "description": "元素索引，从 get_elements 结果中获取（click/fill 时使用）"},
-					"text":       {"type": "string", "description": "要填入的文本（fill 时必需）"},
+					"text":       {"type": "string", "description": "要填入的文本（fill/type_text 时必需）"},
+					"key":        {"type": "string", "description": "要按的键名（press_key 时必需），如 Enter、Tab、Escape、ArrowDown"},
 					"expression": {"type": "string", "description": "JavaScript 表达式（evaluate 时必需）"},
 					"x":          {"type": "number", "description": "点击的 X 坐标（click 时可选）"},
 					"y":          {"type": "number", "description": "点击的 Y 坐标（click 时可选）"},
@@ -116,28 +117,31 @@ func ToolDefinitions(hasSkills bool) []llm.ClaudeTool {
 				"required": ["language", "code"]
 			}`),
 		},
-		// #5: 文件搜索
+		// #5: 文件搜索与目录浏览
 		{
 			Name:        "search_files",
-			Description: "在沙箱中搜索文件。支持 grep（内容搜索）和 find（文件名搜索）两种模式。返回结构化的搜索结果。",
+			Description: "在沙箱中搜索或浏览文件。list=列出目录内容（推荐首次探索目录时使用），grep=按内容搜索，find=按文件名搜索。",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
 				"properties": {
-					"action":           {"type": "string", "enum": ["grep", "find"], "description": "搜索模式：grep=内容搜索，find=文件名搜索"},
-					"path":             {"type": "string", "description": "搜索目录路径"},
-					"pattern":          {"type": "string", "description": "搜索模式（grep=正则表达式，find=glob模式如 *.py）"},
-					"include":          {"type": "array", "items": {"type": "string"}, "description": "文件过滤（仅grep，如 [\"*.py\", \"*.ts\"]）"},
-					"exclude":          {"type": "array", "items": {"type": "string"}, "description": "排除模式（仅grep，如 [\"node_modules\"]）"},
+					"action":           {"type": "string", "enum": ["list", "grep", "find"], "description": "操作：list=列目录，grep=内容搜索，find=文件名搜索"},
+					"path":             {"type": "string", "description": "目录或搜索起点路径"},
+					"pattern":          {"type": "string", "description": "搜索模式（grep=正则，find=glob如 *.py）；list 模式不需要"},
+					"recursive":        {"type": "boolean", "description": "是否递归列出（list 时可选）"},
+					"show_hidden":      {"type": "boolean", "description": "是否显示隐藏文件（list 时可选）"},
+					"max_depth":        {"type": "integer", "description": "最大目录深度（list 时可选）"},
+					"include":          {"type": "array", "items": {"type": "string"}, "description": "文件过滤（仅grep，如 [\"*.py\"]）"},
+					"exclude":          {"type": "array", "items": {"type": "string"}, "description": "排除模式（仅grep）"},
 					"case_insensitive": {"type": "boolean", "description": "忽略大小写（仅grep）"},
 					"max_results":      {"type": "integer", "description": "最大结果数"}
 				},
-				"required": ["action", "path", "pattern"]
+				"required": ["action", "path"]
 			}`),
 		},
 		// #6: Shell 会话管理
 		{
 			Name:        "shell_session",
-			Description: "管理长运行 Shell 会话。支持创建会话、异步执行命令、查看输出、写入stdin、终止进程。适合启动服务器等长运行任务。",
+			Description: "管理长运行 Shell 会话。适合启动服务器、监听日志等需要持续运行的任务（与 execute_command 区别：execute_command 适合短时操作，shell_session 适合长时后台进程）。支持创建会话、异步执行命令、查看输出、写入stdin、终止进程。",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
 				"properties": {
@@ -175,6 +179,25 @@ func ToolDefinitions(hasSkills bool) []llm.ClaudeTool {
 				"path": {"type": "string", "description": "沙箱中的文件绝对路径"}
 			},
 			"required": ["path"]
+		}`),
+	})
+
+	// File edit - precise file editing via StrReplaceEditor
+	tools = append(tools, llm.ClaudeTool{
+		Name:        "file_edit",
+		Description: "精准编辑沙箱中的文件，推荐用于代码修改（避免 write_file 覆盖整个文件）。view=查看文件内容（含行号），str_replace=精准替换字符串，create=新建文件，insert=在指定行后插入内容，undo_edit=撤销上一次编辑。",
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"command":     {"type": "string", "enum": ["view", "str_replace", "create", "insert", "undo_edit"], "description": "操作类型"},
+				"path":        {"type": "string", "description": "文件绝对路径"},
+				"old_str":     {"type": "string", "description": "要替换的原始字符串（str_replace 时必需，必须在文件中唯一匹配）"},
+				"new_str":     {"type": "string", "description": "替换后的新字符串（str_replace/insert 时使用）"},
+				"file_text":   {"type": "string", "description": "新文件内容（create 时必需）"},
+				"insert_line": {"type": "integer", "description": "在该行号之后插入内容（insert 时必需，1-indexed）"},
+				"view_range":  {"type": "array", "items": {"type": "integer"}, "description": "查看行范围 [start, end]（view 时可选）"}
+			},
+			"required": ["command", "path"]
 		}`),
 	})
 
@@ -263,6 +286,9 @@ func ExecuteTool(sbx *SDKSandboxClient, name string, input map[string]interface{
 	case "download_file":
 		return executeDownloadFile(input)
 
+	case "file_edit":
+		return executeFileEdit(sbx, input)
+
 	default:
 		return "Unknown tool: " + name, true
 	}
@@ -310,6 +336,16 @@ func executeMcpTool(sbx *SDKSandboxClient, input map[string]interface{}) (string
 func executeBrowserAction(sbx *SDKSandboxClient, input map[string]interface{}) (string, bool) {
 	action, _ := input["action"].(string)
 	switch action {
+	case "navigate":
+		url, _ := input["url"].(string)
+		if url == "" {
+			return "Error: url is required for navigate", true
+		}
+		result, err := sbx.BrowserNavigate(url)
+		if err != nil {
+			return "Error: " + err.Error(), true
+		}
+		return result, false
 	case "click":
 		selector, _ := input["selector"].(string)
 		var idx *int
@@ -338,6 +374,26 @@ func executeBrowserAction(sbx *SDKSandboxClient, input map[string]interface{}) (
 			idx = &i
 		}
 		result, err := sbx.BrowserFill(selector, idx, text)
+		if err != nil {
+			return "Error: " + err.Error(), true
+		}
+		return result, false
+	case "type_text":
+		text, _ := input["text"].(string)
+		if text == "" {
+			return "Error: text is required for type_text", true
+		}
+		result, err := sbx.BrowserTypeText(text, nil)
+		if err != nil {
+			return "Error: " + err.Error(), true
+		}
+		return result, false
+	case "press_key":
+		key, _ := input["key"].(string)
+		if key == "" {
+			return "Error: key is required for press_key", true
+		}
+		result, err := sbx.BrowserPressKey(key)
 		if err != nil {
 			return "Error: " + err.Error(), true
 		}
@@ -403,6 +459,19 @@ func executeSearchFiles(sbx *SDKSandboxClient, input map[string]interface{}) (st
 	pattern, _ := input["pattern"].(string)
 
 	switch action {
+	case "list":
+		recursive, _ := input["recursive"].(bool)
+		showHidden, _ := input["show_hidden"].(bool)
+		var maxDepth *int
+		if v, ok := input["max_depth"].(float64); ok {
+			n := int(v)
+			maxDepth = &n
+		}
+		result, err := sbx.FileListPath(path, recursive, showHidden, maxDepth)
+		if err != nil {
+			return "Error: " + err.Error(), true
+		}
+		return result, false
 	case "grep":
 		var include, exclude []string
 		if v, ok := input["include"].([]interface{}); ok {
@@ -438,6 +507,19 @@ func executeSearchFiles(sbx *SDKSandboxClient, input map[string]interface{}) (st
 	default:
 		return "Error: invalid search_files action: " + action, true
 	}
+}
+
+func executeFileEdit(sbx *SDKSandboxClient, input map[string]interface{}) (string, bool) {
+	command, _ := input["command"].(string)
+	path, _ := input["path"].(string)
+	if command == "" || path == "" {
+		return "Error: command and path are required for file_edit", true
+	}
+	result, err := sbx.FileStrReplaceEditor(command, path, input)
+	if err != nil {
+		return "Error: " + err.Error(), true
+	}
+	return result, false
 }
 
 func executeShellSession(sbx *SDKSandboxClient, input map[string]interface{}) (string, bool) {

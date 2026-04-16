@@ -34,12 +34,25 @@ sandbox_base_url: https://8080-xxx.agent-sandbox.baidu-int.com
 sandbox_id: xxxxxxxx
 ```
 
+**注意**：`config.yaml` 包含密钥，已加入 `.gitignore`。首次使用请复制 `config.example.yaml`：
+```bash
+cp config.example.yaml config.yaml
+# 然后编辑 config.yaml 填入真实密钥
+```
+
 可选字段：
 
 | 字段 | 说明 | 默认值 |
 |------|------|--------|
 | `llm_provider` | LLM 提供商：`claude`、`gemini`、`openai` | `claude` |
 | `llm_model` | 模型名称 | `Claude Sonnet 4.6` |
+| `llm_max_tokens` | 最大输出 token 数 | `8192` |
+| `llm_debug` | 设为 `true` 时将完整 LLM 请求/响应写入日志（仅调试用，日志量大） | `false` |
+| `llm_custom_header` | 注入 LLM 请求的自定义 HTTP 头（JSON 字符串，用于百度内部 OneAPI 鉴权） | 空 |
+| `max_loop_rounds` | 每次请求最大工具调用轮数，超出则返回错误 | `50` |
+| `listen_addr` | HTTP 服务监听地址 | `:8080` |
+| `data_dir` | 会话数据存储目录 | `data/sessions` |
+| `skills_dir` | Skills 目录 | `skills` |
 
 首次运行前需解压内置 Skills：`unzip skills.zip`
 

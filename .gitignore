@@ -1,8 +1,9 @@
 # Binary
 managed-agent
 
-# Real config (contains secrets) — only commit config.yaml as example
+# Real config (contains secrets) — use config.example.yaml as template
 config.local.yaml
+config.yaml
 
 # Session data
 data/

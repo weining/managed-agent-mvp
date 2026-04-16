@@ -5,15 +5,14 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"managed-agent/llm"
 )
 
-const (
-	maxLoopRounds    = 50
-	baseSystemPrompt = `你是一个强大的 AI 助手，运行在一个功能丰富的 AIO (All-In-One) 沙箱环境中。
+const baseSystemPrompt = `你是一个强大的 AI 助手，运行在一个功能丰富的 AIO (All-In-One) 沙箱环境中。
 
 ## 环境能力
 - **系统**: Ubuntu 22.04, 32核 CPU, 125GB 内存, 2TB 磁盘
@@ -23,67 +22,38 @@ const (
 - **联网**: 完整外网访问，可以 pip install / npm install 安装额外包
 - **显示**: Xvnc 虚拟桌面 1280x1024, 支持 GUI 应用和屏幕录制
 
-## 工具使用策略
+## 工具选择策略
 
-### 基础工具
-- **execute_command**: 执行任意 shell 命令。适合运行代码、安装包、系统操作
-- **write_file**: 写入文件。写代码文件后记得用 execute_command 运行验证
-- **read_file**: 读取文件内容
+| 场景 | 使用工具 |
+|------|---------|
+| 运行命令、安装包、短时操作 | execute_command |
+| 启动服务器、长时运行进程 | shell_session |
+| 创建或完整覆盖文件 | write_file |
+| 读取文件内容 | read_file |
+| 精准编辑文件（推荐代码修改场景）| file_edit（view/str_replace/insert/undo_edit）|
+| 列出目录内容 | search_files action=list |
+| 搜索文件内容或按名查找文件 | search_files action=grep/find |
+| 访问网页、提取文档内容（Markdown）| browse_web |
+| 验证前端页面效果 | take_screenshot |
+| 浏览器导航到 URL | browser_action action=navigate |
+| 点击/填表单/按键/执行JS等交互 | browser_action（click/fill/type_text/press_key/evaluate）|
+| 获取页面可交互元素 | browser_action action=get_elements |
+| 交互式数据分析、逐步调试 | execute_code |
+| 调用 MCP 服务 | mcp_tool（先 list_servers → list_tools → call_tool）|
+| 录制桌面操作过程 | display_record |
+| 生成文件交付用户下载 | download_file（必须主动调用，不要只告诉路径）|
 
-### 浏览器工具
-- **browse_web**: 访问网页并提取 Markdown 格式内容。适合搜索信息、查看文档
-  - 搜索: browse_web("https://www.baidu.com/s?wd=关键词")
-  - 注意: 沙箱无法访问 Google，请使用百度搜索
-- **take_screenshot**: 对网页截图。适合验证前端效果、记录页面状态
-- **browser_action**: 与浏览器交互（点击、填写表单、执行JS、获取元素列表等）
-  - 先用 get_elements 获取页面可交互元素列表
-  - 再用 click/fill 操作具体元素（通过 selector 或 index）
-  - 用 evaluate 执行任意 JavaScript 代码
-  - 用 scroll 滚动页面
-  - 用 get_console 查看浏览器控制台日志
-
-### 代码执行
-- **execute_code**: 直接执行 Python/JavaScript，返回结构化的 stdout/stderr/traceback
-  - 支持有状态会话：提供 session_id 可保持变量跨调用
-  - 适合交互式数据分析、逐步调试
-
-### 文件搜索
-- **search_files**: 在沙箱中搜索文件
-  - grep: 搜索文件内容（正则表达式），返回匹配的文件:行号:内容
-  - find: 按文件名搜索（glob模式如 *.py）
-
-### MCP 工具
-- **mcp_tool**: 发现和调用沙箱中配置的 MCP 服务器工具
-  - 先 list_servers 查看可用服务器
-  - 再 list_tools 查看某服务器的工具
-  - 最后 call_tool 调用具体工具
-
-### Shell 会话管理
-- **shell_session**: 管理长运行进程（如启动开发服务器）
-  - create: 创建新会话
-  - exec: 在会话中执行命令（支持异步）
-  - view: 查看会话输出
-  - write: 向进程写入 stdin
-  - kill: 终止进程
-  - list: 列出所有活跃会话
-
-### 屏幕录制
-- **display_record**: 录制沙箱桌面
-  - start: 开始录制, stop: 停止录制, status: 查询状态
-
-### 文件下载
-- **download_file**: 生成沙箱文件的下载链接。当你在沙箱中生成了文件（如文档、图片、压缩包）需要交付给用户时使用此工具
-  - 提供文件的绝对路径，会返回可供用户点击下载的链接
+## 搜索引擎规则
+- 中文资料: https://www.baidu.com/s?wd=关键词
+- 英文资料: https://www.bing.com/search?q=keywords
+- **禁止使用 Google**（沙箱无法访问）
 
 ## 行为准则
 - 直接动手解决问题，先写代码再运行验证
 - 遇到错误时分析原因并修复，不要只是报告错误
 - 用中文回复用户，代码注释可以用英文
 - 保持回复简洁，避免冗长解释
-- 需要查询信息时，主动使用 browse_web 搜索
-- 前端开发时，可以启动 HTTP server 并用 take_screenshot 验证效果
-- 需要与网页交互时（填表单、点击按钮），使用 browser_action`
-)
+- 在沙箱中生成了用户需要下载的文件（文档、图片、压缩包等）后，**必须立即调用 download_file** 提供下载链接`
 
 // SSEWriter is the interface for streaming events to the client.
 type SSEWriter interface {
@@ -97,6 +67,7 @@ type AgentDeps struct {
 	Sandbox *SDKSandboxClient
 	Claude  llm.LLMClient
 	Skills  *SkillRegistry
+	Config  *Config
 }
 
 // buildSystemPrompt composes the full system prompt from the base, skill
@@ -125,7 +96,14 @@ func RunAgent(deps *AgentDeps, sess *Session, userMsg string, sse SSEWriter) err
 	hasSkills := len(deps.Skills.List()) > 0
 	tools := ToolDefinitions(hasSkills)
 
-	for round := 0; round < maxLoopRounds; round++ {
+	maxRounds := 50
+	if deps.Config != nil {
+		if n, err := strconv.Atoi(deps.Config.MaxLoopRounds); err == nil && n > 0 {
+			maxRounds = n
+		}
+	}
+
+	for round := 0; round < maxRounds; round++ {
 		// Reload session to get latest events (including skill changes)
 		sess, _ = store.Get(sess.ID)
 
@@ -250,7 +228,7 @@ func RunAgent(deps *AgentDeps, sess *Session, userMsg string, sse SSEWriter) err
 	// Hit max rounds
 	sse.WriteEvent("error", `{"error":"Agent loop exceeded maximum rounds"}`)
 	sse.Flush()
-	return fmt.Errorf("agent loop exceeded %d rounds", maxLoopRounds)
+	return fmt.Errorf("agent loop exceeded %d rounds", maxRounds)
 }
 
 // executeSkillTool handles the "skill" tool calls (activate/deactivate/list).
