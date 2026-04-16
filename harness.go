@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"path/filepath"
 	"strconv"
@@ -98,6 +100,14 @@ func RunAgentWithContent(deps *AgentDeps, sess *Session, userContent UserMessage
 		Type:    "user_message",
 		Content: userContent,
 	})
+
+	// Prefetch all image attachments in session history into cache.
+	if deps.ImageCache != nil {
+		freshSess, _ := store.Get(sess.ID)
+		if freshSess != nil {
+			prefetchSessionImages(freshSess.Events, deps.Sandbox, deps.ImageCache)
+		}
+	}
 
 	hasSkills := len(deps.Skills.List()) > 0
 	tools := ToolDefinitions(hasSkills)
@@ -657,5 +667,44 @@ func toStringMap(v interface{}) map[string]interface{} {
 		var m map[string]interface{}
 		json.Unmarshal(data, &m)
 		return m
+	}
+}
+
+// prefetchSessionImages downloads all image attachments in session events
+// that are not yet cached into imgCache. Errors are logged but do not abort the agent.
+func prefetchSessionImages(events []Event, sbx *SDKSandboxClient, imgCache *ImageCache) {
+	for _, evt := range events {
+		if evt.Type != "user_message" {
+			continue
+		}
+		data, _ := json.Marshal(evt.Content)
+		var msg UserMessageContent
+		if err := json.Unmarshal(data, &msg); err != nil {
+			continue
+		}
+		for _, att := range msg.Attachments {
+			if !att.IsImage {
+				continue
+			}
+			if _, ok := imgCache.Get(att.Path); ok {
+				continue // already cached
+			}
+			reader, err := sbx.DownloadFile(att.Path)
+			if err != nil {
+				log.Printf("image prefetch: download failed for %s: %v", att.Path, err)
+				continue
+			}
+			raw, err := io.ReadAll(reader)
+			if err != nil {
+				log.Printf("image prefetch: read failed for %s: %v", att.Path, err)
+				continue
+			}
+			mimeType := att.MIMEType
+			if mimeType == "" {
+				mimeType = "image/jpeg"
+			}
+			imgCache.Set(att.Path, mimeType, base64.StdEncoding.EncodeToString(raw))
+			log.Printf("image prefetch: cached %s (%d bytes)", att.Path, len(raw))
+		}
 	}
 }
