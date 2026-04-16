@@ -100,8 +100,9 @@ type toolCallAccum struct {
 	arguments strings.Builder
 }
 
-// CallStream implements LLMClient.
-func (c *OpenAIClient) CallStream(system string, messages []ClaudeMessage, tools []ClaudeTool, cb StreamCallback) (*ClaudeResponse, error) {
+// buildOAIMessages converts canonical ClaudeMessages to OpenAI message format.
+// Image content blocks become image_url parts with base64 data URLs.
+func buildOAIMessages(system string, messages []ClaudeMessage) []oaiMessage {
 	var oaiMsgs []oaiMessage
 	if system != "" {
 		oaiMsgs = append(oaiMsgs, oaiMessage{Role: "system", Content: system})
@@ -110,18 +111,28 @@ func (c *OpenAIClient) CallStream(system string, messages []ClaudeMessage, tools
 	for _, msg := range messages {
 		switch msg.Role {
 		case "user":
-			// Separate plain text blocks from tool_result blocks.
-			// Tool results must appear before any new user text (OpenAI requires
-			// role=tool messages immediately after the assistant tool_calls message).
-			var textParts []string
 			var toolResults []ContentBlock
+			var contentParts []interface{}
+
 			for _, block := range msg.Content {
-				if block.Type == "text" {
-					textParts = append(textParts, block.Text)
-				} else if block.Type == "tool_result" {
+				switch block.Type {
+				case "tool_result":
 					toolResults = append(toolResults, block)
+				case "image":
+					contentParts = append(contentParts, map[string]interface{}{
+						"type": "image_url",
+						"image_url": map[string]interface{}{
+							"url": "data:" + block.ImageMIMEType + ";base64," + block.ImageData,
+						},
+					})
+				case "text":
+					contentParts = append(contentParts, map[string]interface{}{
+						"type": "text",
+						"text": block.Text,
+					})
 				}
 			}
+
 			for _, tr := range toolResults {
 				oaiMsgs = append(oaiMsgs, oaiMessage{
 					Role:       "tool",
@@ -129,11 +140,33 @@ func (c *OpenAIClient) CallStream(system string, messages []ClaudeMessage, tools
 					Content:    tr.Content,
 				})
 			}
-			if len(textParts) > 0 {
-				oaiMsgs = append(oaiMsgs, oaiMessage{
-					Role:    "user",
-					Content: strings.Join(textParts, "\n"),
-				})
+
+			if len(contentParts) > 0 {
+				anyImage := false
+				for _, p := range contentParts {
+					if pm, ok := p.(map[string]interface{}); ok {
+						if pm["type"] == "image_url" {
+							anyImage = true
+							break
+						}
+					}
+				}
+				if anyImage {
+					oaiMsgs = append(oaiMsgs, oaiMessage{Role: "user", Content: contentParts})
+				} else {
+					var texts []string
+					for _, p := range contentParts {
+						if pm, ok := p.(map[string]interface{}); ok {
+							if t, ok := pm["text"].(string); ok {
+								texts = append(texts, t)
+							}
+						}
+					}
+					oaiMsgs = append(oaiMsgs, oaiMessage{
+						Role:    "user",
+						Content: strings.Join(texts, "\n"),
+					})
+				}
 			}
 
 		case "assistant":
@@ -165,6 +198,12 @@ func (c *OpenAIClient) CallStream(system string, messages []ClaudeMessage, tools
 			})
 		}
 	}
+	return oaiMsgs
+}
+
+// CallStream implements LLMClient.
+func (c *OpenAIClient) CallStream(system string, messages []ClaudeMessage, tools []ClaudeTool, cb StreamCallback) (*ClaudeResponse, error) {
+	oaiMsgs := buildOAIMessages(system, messages)
 
 	var oaiTools []oaiTool
 	for _, t := range tools {
