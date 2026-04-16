@@ -3,6 +3,7 @@ package llm
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"strconv"
 )
 
@@ -21,10 +22,11 @@ type Config struct {
 	APIKey    string
 	Model     string
 	MaxTokens int
+	Debug     bool
 }
 
 // ParseConfig converts string-based config values into a typed Config.
-func ParseConfig(provider, baseURL, apiKey, model, maxTokensStr string) Config {
+func ParseConfig(provider, baseURL, apiKey, model, maxTokensStr string, debug bool) Config {
 	maxTokens := 8192
 	if maxTokensStr != "" {
 		if v, err := strconv.Atoi(maxTokensStr); err == nil && v > 0 {
@@ -37,22 +39,52 @@ func ParseConfig(provider, baseURL, apiKey, model, maxTokensStr string) Config {
 		APIKey:    apiKey,
 		Model:     model,
 		MaxTokens: maxTokens,
+		Debug:     debug,
 	}
 }
 
 // New creates an LLMClient based on cfg.Provider.
 // Valid providers: "" or "claude" (default), "gemini", "openai".
 func New(cfg Config) (LLMClient, error) {
+	var client LLMClient
 	switch cfg.Provider {
 	case "", "claude":
-		return newClaudeClient(cfg), nil
+		client = newClaudeClient(cfg)
 	case "gemini":
-		return newGeminiClient(cfg), nil
+		client = newGeminiClient(cfg)
 	case "openai":
-		return newOpenAIClient(cfg), nil
+		client = newOpenAIClient(cfg)
 	default:
 		return nil, fmt.Errorf("unknown llm_provider: %q (valid: claude, gemini, openai)", cfg.Provider)
 	}
+	if cfg.Debug {
+		client = &debugClient{inner: client}
+	}
+	return client, nil
+}
+
+// debugClient wraps an LLMClient and logs full request/response payloads.
+type debugClient struct {
+	inner LLMClient
+}
+
+func (d *debugClient) CallStream(system string, messages []ClaudeMessage, tools []ClaudeTool, cb StreamCallback) (*ClaudeResponse, error) {
+	reqJSON, _ := json.MarshalIndent(map[string]interface{}{
+		"system":   system[:min(len(system), 500)] + "...",
+		"messages": messages,
+		"tools":    len(tools),
+	}, "", "  ")
+	log.Printf("[LLM DEBUG] === REQUEST ===\n%s", string(reqJSON))
+
+	resp, err := d.inner.CallStream(system, messages, tools, cb)
+
+	if err != nil {
+		log.Printf("[LLM DEBUG] === ERROR ===\n%v", err)
+	} else {
+		respJSON, _ := json.MarshalIndent(resp, "", "  ")
+		log.Printf("[LLM DEBUG] === RESPONSE ===\n%s", string(respJSON))
+	}
+	return resp, err
 }
 
 // --- Shared message types (internal canonical format) ---

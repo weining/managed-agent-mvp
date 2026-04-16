@@ -37,6 +37,7 @@ func main() {
 	// Initialize LLM client
 	llmClient, err := llm.New(llm.ParseConfig(
 		cfg.LLMProvider, cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.LLMModel, cfg.LLMMaxTokens,
+		cfg.LLMDebug == "true",
 	))
 	if err != nil {
 		log.Fatalf("Failed to init LLM client: %v", err)

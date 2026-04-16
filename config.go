@@ -16,6 +16,9 @@ type Config struct {
 	LLMCustomHeader string `json:"llm_custom_header"` // JSON string for custom request header
 	LLMProvider     string `json:"llm_provider"`
 
+	// Debug
+	LLMDebug string `json:"llm_debug"` // "true" to log full LLM request/response
+
 	// Sandbox
 	SandboxBaseURL string `json:"sandbox_base_url"`
 	SandboxID      string `json:"sandbox_id"`
@@ -74,6 +77,7 @@ func (c *Config) applyEnv() {
 	envOverride(&c.LLMMaxTokens, "LLM_MAX_TOKENS")
 	envOverride(&c.LLMCustomHeader, "LLM_CUSTOM_HEADER")
 	envOverride(&c.LLMProvider, "LLM_PROVIDER")
+	envOverride(&c.LLMDebug, "LLM_DEBUG")
 	envOverride(&c.SandboxBaseURL, "SANDBOX_BASE_URL")
 	envOverride(&c.SandboxID, "SANDBOX_ID")
 	envOverride(&c.ListenAddr, "LISTEN_ADDR")
@@ -129,6 +133,7 @@ func (c *Config) fieldMap() map[string]*string {
 		"llm_max_tokens":    &c.LLMMaxTokens,
 		"llm_custom_header": &c.LLMCustomHeader,
 		"llm_provider":      &c.LLMProvider,
+		"llm_debug":         &c.LLMDebug,
 		"sandbox_base_url":  &c.SandboxBaseURL,
 		"sandbox_id":        &c.SandboxID,
 		"listen_addr":       &c.ListenAddr,
