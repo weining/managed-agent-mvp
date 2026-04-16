@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -36,10 +37,19 @@ type geminiContent struct {
 }
 
 type geminiPart struct {
-	Text             string              `json:"text,omitempty"`
-	FunctionCall     *geminiFunctionCall `json:"functionCall,omitempty"`
-	FunctionResp     *geminiFunctionResp `json:"functionResponse,omitempty"`
-	ThoughtSignature string              `json:"thoughtSignature,omitempty"`
+	Text               string              `json:"text,omitempty"`
+	FunctionCall       *geminiFunctionCall `json:"functionCall,omitempty"`
+	FunctionResp       *geminiFunctionResp `json:"functionResponse,omitempty"`
+	ThoughtSignature   string              `json:"thoughtSignature,omitempty"`
+	ThoughtSignatureSC string              `json:"thought_signature,omitempty"` // snake_case variant
+}
+
+// getThoughtSignature returns the thought signature from whichever field is set.
+func (p geminiPart) getThoughtSignature() string {
+	if p.ThoughtSignature != "" {
+		return p.ThoughtSignature
+	}
+	return p.ThoughtSignatureSC
 }
 
 type geminiFunctionCall struct {
@@ -149,10 +159,12 @@ func (c *GeminiClient) CallStream(system string, messages []ClaudeMessage, tools
 				case "tool_use":
 					// thoughtSignature must be on the same Part as functionCall,
 					// not a separate part — Gemini requires it for history replay.
+					// Set both camelCase and snake_case fields for compatibility.
 					args := toGeminiArgs(block.Input)
 					parts = append(parts, geminiPart{
-						FunctionCall:     &geminiFunctionCall{Name: block.Name, Args: args},
-						ThoughtSignature: block.ThoughtSignature,
+						FunctionCall:       &geminiFunctionCall{Name: block.Name, Args: args},
+						ThoughtSignature:   block.ThoughtSignature,
+						ThoughtSignatureSC: block.ThoughtSignature,
 					})
 				}
 			}
@@ -244,6 +256,9 @@ func (c *GeminiClient) CallStream(system string, messages []ClaudeMessage, tools
 				if part.FunctionCall != nil {
 					seq := atomic.AddUint64(&geminiToolIDCounter, 1)
 					id := fmt.Sprintf("gemini-%s-%d", part.FunctionCall.Name, seq)
+					thoughtSig := part.getThoughtSignature()
+					log.Printf("[gemini] functionCall=%s thoughtSig_len=%d raw_chunk_snippet=%.200s",
+						part.FunctionCall.Name, len(thoughtSig), dataStr)
 					cb("tool_use_start", map[string]interface{}{
 						"index": len(toolBlocks),
 						"id":    id,
@@ -265,7 +280,7 @@ func (c *GeminiClient) CallStream(system string, messages []ClaudeMessage, tools
 						ID:               id,
 						Name:             part.FunctionCall.Name,
 						Input:            input,
-						ThoughtSignature: part.ThoughtSignature,
+						ThoughtSignature: part.getThoughtSignature(),
 					})
 				}
 			}
