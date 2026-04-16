@@ -694,6 +694,9 @@ func prefetchSessionImages(events []Event, sbx *SDKSandboxClient, imgCache *Imag
 				log.Printf("image prefetch: download failed for %s: %v", att.Path, err)
 				continue
 			}
+			if rc, ok := reader.(io.ReadCloser); ok {
+				defer rc.Close()
+			}
 			raw, err := io.ReadAll(reader)
 			if err != nil {
 				log.Printf("image prefetch: read failed for %s: %v", att.Path, err)
