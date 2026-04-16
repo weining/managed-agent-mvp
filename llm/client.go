@@ -143,6 +143,9 @@ type Usage struct {
 // For all other block types, the default struct marshaling is used.
 func (b ContentBlock) MarshalJSON() ([]byte, error) {
 	if b.Type == "image" {
+		if b.ImageMIMEType == "" || b.ImageData == "" {
+			return nil, fmt.Errorf("ContentBlock type=image requires ImageMIMEType and ImageData")
+		}
 		return json.Marshal(struct {
 			Type   string `json:"type"`
 			Source struct {

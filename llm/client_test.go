@@ -59,6 +59,22 @@ func TestContentBlockMarshalJSON_Text(t *testing.T) {
 	}
 }
 
+func TestContentBlockMarshalJSON_ImageEmptyFields(t *testing.T) {
+	// Empty ImageMIMEType should return error
+	b := ContentBlock{Type: "image", ImageData: "abc=="}
+	_, err := json.Marshal(b)
+	if err == nil {
+		t.Error("expected error for image block with empty ImageMIMEType, got nil")
+	}
+
+	// Empty ImageData should return error
+	b2 := ContentBlock{Type: "image", ImageMIMEType: "image/jpeg"}
+	_, err = json.Marshal(b2)
+	if err == nil {
+		t.Error("expected error for image block with empty ImageData, got nil")
+	}
+}
+
 func TestContentBlockMarshalJSON_ToolResult(t *testing.T) {
 	b := ContentBlock{
 		Type:      "tool_result",
