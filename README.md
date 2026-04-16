@@ -22,10 +22,12 @@
 ## 功能特性
 
 - **会话管理**：创建/持久化多轮对话，文件存储
+- **图片视觉**：上传图片后后端自动下载并 base64 编码，以原生 `image` content block 传入 LLM，三个 provider（Claude/OpenAI/Gemini）均支持；进程内缓存避免重复下载，缓存 miss 降级为文本路径
+- **文件上传**：支持多附件上传至沙箱，图片可直接被模型"看到"，非图片文件路径注入上下文
 - **Skills 系统**：按目录加载 SKILL.md，支持用户 `/skill-name` 激活或模型自动激活
 - **沙箱集成**：代码执行、文件读写、浏览器操作等工具
 - **SSE 流式输出**：实时推送 Agent 思考和工具调用过程
-- **Web 前端**：内置简洁聊天界面
+- **Web 前端**：内置聊天界面，支持附件预览、拖拽上传
 - **文件下载**：直接从沙箱下载生成的文件
 
 ## 快速开始
@@ -100,7 +102,9 @@ open http://localhost:8080
 | `GET` | `/api/sessions` | 列出所有会话 |
 | `GET` | `/api/sessions/{id}` | 获取会话详情 |
 | `POST` | `/api/sessions/{id}/messages` | 发送消息（SSE 流式响应） |
+| `POST` | `/api/sessions/{id}/upload` | 上传文件/图片到沙箱 |
 | `GET` | `/api/files/download?path=` | 从沙箱下载文件 |
+| `GET` | `/api/files/content?path=` | 读取沙箱文件内容（用于图片预览）|
 
 ## Skills 系统
 

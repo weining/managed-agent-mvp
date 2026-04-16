@@ -70,12 +70,14 @@ cp config.example.yaml config.yaml
 5. 所有中间事件通过 SSE 实时推送给客户端
 
 **核心文件说明：**
-- `harness.go` — Agent 循环（`RunAgent`）、系统 prompt 组装、从事件日志重建消息历史、skill 文件部署到沙箱
+- `harness.go` — Agent 循环（`RunAgent`）、系统 prompt 组装、从事件日志重建消息历史、skill 文件部署到沙箱、图片预热缓存（`prefetchSessionImages`）与内容块构建（`buildContentBlocks`）
+- `image_cache.go` — 进程内图片缓存（`ImageCache`）：key 为沙箱路径，value 为 base64 编码字节 + MIME 类型；线程安全，缓存 miss 时降级为文本路径
 - `session.go` — `Session` 与 `SessionStore`：文件存储于 `data/sessions/`，每个会话是一个含有序 `[]Event` 的 `<id>.json`
 - `skills.go` — `SkillRegistry` 与 `Skill`：加载 `skills/<name>/SKILL.md`（含 YAML frontmatter），支持 `user_invocable` 和 `disable-model-invocation` 标志，激活时将捆绑文件（`scripts/`、`references/`、`assets/`）部署至沙箱的 `/home/gem/skills/<name>/`
-- `claude.go` — `LLMClient` 接口定义、`ClaudeClient` 实现（Anthropic Messages API）、`NewLLMClient` 工厂函数
-- `gemini.go` — `GeminiClient` 实现（Google Gemini streamGenerateContent API）
-- `openai.go` — `OpenAIClient` 实现（OpenAI 兼容 /v1/chat/completions API）
+- `llm/client.go` — `LLMClient` 接口、`ContentBlock`（含 `ImageMIMEType`/`ImageData` 字段及自定义 `MarshalJSON`）、`ClaudeMessage`
+- `llm/claude.go` — `ClaudeClient` 实现（Anthropic Messages API），序列化 `image` block 为 `source.type=base64` 格式
+- `llm/gemini.go` — `GeminiClient` 实现（Google Gemini streamGenerateContent API），序列化 `image` block 为 `inlineData` part
+- `llm/openai.go` — `OpenAIClient` 实现（OpenAI 兼容 /v1/chat/completions API），序列化 `image` block 为 `image_url` 格式；`buildOAIMessages` 负责消息格式转换
 - `sandbox_sdk.go` — `SDKSandboxClient`：封装 `github.com/agent-infra/sandbox-sdk-go`，提供 `ExecCommand`、`WriteFile`、`ReadFile`、`DownloadFile`
 - `tools.go` — `ToolDefinitions`（Claude 工具 schema）与 `ExecuteTool`（分发至 Sandbox SDK）
 - `config.go` — `Config` 含手写 YAML 解析器（无外部依赖），环境变量名为字段名大写加下划线
@@ -106,7 +108,9 @@ Prompt 内容写在这里...
 
 | 类型 | Content 内容 |
 |------|-------------|
-| `user_message` | string |
+| `user_message` | `UserMessageContent{Text string, Attachments []Attachment}`（或历史兼容的纯 string） |
 | `assistant_message` | string |
 | `tool_use` | `{id, name, input}` |
 | `tool_result` | `{tool_use_id, output, is_error}` |
+
+**图片视觉能力**：`user_message` 中 `IsImage=true` 的附件在 agent 循环前由 `prefetchSessionImages` 从沙箱下载，base64 编码后写入 `ImageCache`；`buildMessages` 时缓存命中则生成原生 `image` content block 传入 LLM，缓存 miss 降级为文本路径描述。三个 provider（Claude/OpenAI/Gemini）各自在序列化层处理 `image` block 格式差异，`CallStream` 接口签名不变。
