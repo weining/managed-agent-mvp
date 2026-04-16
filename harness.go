@@ -42,6 +42,7 @@ const baseSystemPrompt = `你是一个强大的 AI 助手，运行在一个功�
 | 调用 MCP 服务 | mcp_tool（先 list_servers → list_tools → call_tool）|
 | 录制桌面操作过程 | display_record |
 | 生成文件交付用户下载 | download_file（必须主动调用，不要只告诉路径）|
+| 解读或处理用户上传的文件 | 用 read_file 读取 /home/gem/uploads/ 下对应的文件 |
 
 ## 搜索引擎规则
 - 中文资料: https://www.baidu.com/s?wd=关键词
@@ -63,11 +64,12 @@ type SSEWriter interface {
 
 // AgentDeps groups the dependencies injected into RunAgent.
 type AgentDeps struct {
-	Store   *SessionStore
-	Sandbox *SDKSandboxClient
-	Claude  llm.LLMClient
-	Skills  *SkillRegistry
-	Config  *Config
+	Store      *SessionStore
+	Sandbox    *SDKSandboxClient
+	Claude     llm.LLMClient
+	Skills     *SkillRegistry
+	Config     *Config
+	ImageCache *ImageCache
 }
 
 // buildSystemPrompt composes the full system prompt from the base, skill
@@ -85,12 +87,16 @@ func buildSystemPrompt(skills *SkillRegistry, activeSkills []string, skillArgs m
 
 // RunAgent executes the agent loop for a user message in a session.
 func RunAgent(deps *AgentDeps, sess *Session, userMsg string, sse SSEWriter) error {
+	return RunAgentWithContent(deps, sess, UserMessageContent{Text: userMsg}, sse)
+}
+
+func RunAgentWithContent(deps *AgentDeps, sess *Session, userContent UserMessageContent, sse SSEWriter) error {
 	store := deps.Store
 
 	// 1. Emit user message event
 	store.EmitEvent(sess.ID, Event{
 		Type:    "user_message",
-		Content: userMsg,
+		Content: userContent,
 	})
 
 	hasSkills := len(deps.Skills.List()) > 0
@@ -108,7 +114,7 @@ func RunAgent(deps *AgentDeps, sess *Session, userMsg string, sse SSEWriter) err
 		sess, _ = store.Get(sess.ID)
 
 		systemPrompt := buildSystemPrompt(deps.Skills, sess.ActiveSkills, sess.SkillArgs)
-		messages := buildMessages(sess.Events)
+		messages := buildMessages(sess.Events, deps.ImageCache)
 
 		// 3. Call Claude (streaming)
 		var fullText string
@@ -229,6 +235,36 @@ func RunAgent(deps *AgentDeps, sess *Session, userMsg string, sse SSEWriter) err
 	sse.WriteEvent("error", `{"error":"Agent loop exceeded maximum rounds"}`)
 	sse.Flush()
 	return fmt.Errorf("agent loop exceeded %d rounds", maxRounds)
+}
+
+func buildUserPrompt(content UserMessageContent) string {
+	text := strings.TrimSpace(content.Text)
+	if len(content.Attachments) == 0 {
+		return text
+	}
+
+	var sb strings.Builder
+	if text != "" {
+		sb.WriteString(text)
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString("[用户已上传附件]\n")
+	for _, attachment := range content.Attachments {
+		sb.WriteString("- ")
+		sb.WriteString(attachment.Filename)
+		if attachment.MIMEType != "" {
+			sb.WriteString(" (")
+			sb.WriteString(attachment.MIMEType)
+			sb.WriteString(")")
+		}
+		sb.WriteString(" → 沙箱路径: ")
+		sb.WriteString(attachment.Path)
+		if attachment.IsImage {
+			sb.WriteString(" [图片]")
+		}
+		sb.WriteString("\n")
+	}
+	return strings.TrimSpace(sb.String())
 }
 
 // executeSkillTool handles the "skill" tool calls (activate/deactivate/list).
@@ -383,7 +419,7 @@ func isExecutable(relPath string) bool {
 }
 
 // buildMessages converts session events into Claude message format.
-func buildMessages(events []Event) []llm.ClaudeMessage {
+func buildMessages(events []Event, imgCache *ImageCache) []llm.ClaudeMessage {
 	var messages []llm.ClaudeMessage
 	var pendingAssistant []llm.ContentBlock
 	var pendingToolResults []llm.ContentBlock
@@ -413,12 +449,10 @@ func buildMessages(events []Event) []llm.ClaudeMessage {
 		case "user_message":
 			flushAssistant()
 			flushToolResults()
-			text, _ := evt.Content.(string)
+			blocks := extractUserMessageBlocks(evt.Content, imgCache)
 			messages = append(messages, llm.ClaudeMessage{
-				Role: "user",
-				Content: []llm.ContentBlock{
-					{Type: "text", Text: text},
-				},
+				Role:    "user",
+				Content: blocks,
 			})
 
 		case "assistant_message":
@@ -462,6 +496,92 @@ func buildMessages(events []Event) []llm.ClaudeMessage {
 	flushAssistant()
 	flushToolResults()
 	return fixDanglingToolUse(messages)
+}
+
+func extractUserMessageText(content interface{}) string {
+	switch v := content.(type) {
+	case string:
+		return v
+	case map[string]interface{}:
+		var msg UserMessageContent
+		data, _ := json.Marshal(v)
+		if err := json.Unmarshal(data, &msg); err == nil {
+			return buildUserPrompt(msg)
+		}
+	default:
+		data, _ := json.Marshal(v)
+		var msg UserMessageContent
+		if err := json.Unmarshal(data, &msg); err == nil {
+			return buildUserPrompt(msg)
+		}
+	}
+	return ""
+}
+
+// extractUserMessageBlocks converts a user_message event's content into
+// content blocks, substituting cached images as native image blocks.
+func extractUserMessageBlocks(content interface{}, imgCache *ImageCache) []llm.ContentBlock {
+	switch v := content.(type) {
+	case string:
+		if v == "" {
+			return []llm.ContentBlock{{Type: "text", Text: ""}}
+		}
+		return []llm.ContentBlock{{Type: "text", Text: v}}
+	default:
+		data, _ := json.Marshal(v)
+		var msg UserMessageContent
+		if err := json.Unmarshal(data, &msg); err == nil {
+			return buildContentBlocks(msg, imgCache)
+		}
+	}
+	return []llm.ContentBlock{{Type: "text", Text: ""}}
+}
+
+// buildContentBlocks converts a UserMessageContent into content blocks.
+// Image attachments with cache hits become image blocks; others become text.
+func buildContentBlocks(msg UserMessageContent, imgCache *ImageCache) []llm.ContentBlock {
+	var blocks []llm.ContentBlock
+
+	if text := strings.TrimSpace(msg.Text); text != "" {
+		blocks = append(blocks, llm.ContentBlock{Type: "text", Text: text})
+	}
+
+	var textAttachments []string
+	for _, att := range msg.Attachments {
+		if att.IsImage {
+			if cached, ok := imgCache.Get(att.Path); ok {
+				blocks = append(blocks, llm.ContentBlock{
+					Type:          "image",
+					ImageMIMEType: cached.MIMEType,
+					ImageData:     cached.Base64,
+				})
+				continue
+			}
+			// cache miss: fall back to text description
+		}
+		// non-image or cache-miss: text description
+		desc := att.Filename
+		if att.MIMEType != "" {
+			desc += " (" + att.MIMEType + ")"
+		}
+		desc += " → 沙箱路径: " + att.Path
+		if att.IsImage {
+			desc += " [图片]"
+		}
+		textAttachments = append(textAttachments, desc)
+	}
+
+	if len(textAttachments) > 0 {
+		blocks = append(blocks, llm.ContentBlock{
+			Type: "text",
+			Text: "[用户已上传附件]\n- " + strings.Join(textAttachments, "\n- "),
+		})
+	}
+
+	if len(blocks) == 0 {
+		blocks = append(blocks, llm.ContentBlock{Type: "text", Text: ""})
+	}
+	return blocks
 }
 
 // fixDanglingToolUse inserts synthetic tool_results when an assistant message
