@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 )
 
 // GeminiClient implements LLMClient using Google Gemini streamGenerateContent API.
@@ -80,6 +81,9 @@ type geminiCandidate struct {
 	Content      geminiContent `json:"content"`
 	FinishReason string        `json:"finishReason"`
 }
+
+// geminiToolIDCounter ensures unique tool call IDs across agent loop rounds.
+var geminiToolIDCounter uint64
 
 // CallStream implements LLMClient.
 func (c *GeminiClient) CallStream(system string, messages []ClaudeMessage, tools []ClaudeTool, cb StreamCallback) (*ClaudeResponse, error) {
@@ -211,7 +215,6 @@ func (c *GeminiClient) CallStream(system string, messages []ClaudeMessage, tools
 
 	result := &ClaudeResponse{StopReason: "end_turn"}
 	var textBuf strings.Builder
-	toolIndex := 0
 	var toolBlocks []ContentBlock
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -239,8 +242,8 @@ func (c *GeminiClient) CallStream(system string, messages []ClaudeMessage, tools
 					cb("text", part.Text)
 				}
 				if part.FunctionCall != nil {
-					id := fmt.Sprintf("gemini-%s-%d", part.FunctionCall.Name, toolIndex)
-					toolIndex++
+					seq := atomic.AddUint64(&geminiToolIDCounter, 1)
+					id := fmt.Sprintf("gemini-%s-%d", part.FunctionCall.Name, seq)
 					cb("tool_use_start", map[string]interface{}{
 						"index": len(toolBlocks),
 						"id":    id,
