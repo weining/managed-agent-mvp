@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
 	"net/url"
 	"path/filepath"
 	"strings"
 )
+
+const uploadMaxSize = 100 << 20 // 100 MB
 
 type httpSSEWriter struct {
 	w       http.ResponseWriter
@@ -79,19 +82,21 @@ func setupRoutes(deps *AgentDeps) http.Handler {
 		}
 
 		var body struct {
-			Message string `json:"message"`
+			Message     string       `json:"message"`
+			Attachments []Attachment `json:"attachments"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
-		if strings.TrimSpace(body.Message) == "" {
-			http.Error(w, "Message cannot be empty", http.StatusBadRequest)
+		body.Message = strings.TrimSpace(body.Message)
+		if body.Message == "" && len(body.Attachments) == 0 {
+			http.Error(w, "Message or attachments are required", http.StatusBadRequest)
 			return
 		}
 
 		// Handle /skill-name [args] as explicit skill activation
-		msg := strings.TrimSpace(body.Message)
+		msg := body.Message
 		if after, ok := strings.CutPrefix(msg, "/"); ok {
 			// Split into skill name and optional arguments
 			skillName, skillArgs, _ := strings.Cut(after, " ")
@@ -171,7 +176,10 @@ func setupRoutes(deps *AgentDeps) http.Handler {
 
 		sse := &httpSSEWriter{w: w, flusher: flusher}
 
-		if err := RunAgent(deps, sess, body.Message, sse); err != nil {
+		if err := RunAgentWithContent(deps, sess, UserMessageContent{
+			Text:        body.Message,
+			Attachments: body.Attachments,
+		}, sse); err != nil {
 			log.Printf("Agent error for session %s: %v", id, err)
 		}
 	})
@@ -180,8 +188,115 @@ func setupRoutes(deps *AgentDeps) http.Handler {
 	mux.HandleFunc("OPTIONS /api/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept")
 		w.WriteHeader(http.StatusNoContent)
+	})
+
+	// Upload file into sandbox for a session
+	// Form fields: file (required), path (optional dest), message (optional — if set, triggers agent via SSE)
+	mux.HandleFunc("POST /api/sessions/{id}/upload", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		sess, err := store.Get(id)
+		if err != nil {
+			http.Error(w, "Session not found", http.StatusNotFound)
+			return
+		}
+
+		r.Body = http.MaxBytesReader(w, r.Body, uploadMaxSize)
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			http.Error(w, "Failed to parse form (max 100 MB): "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, "Missing 'file' field in form: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+
+		// Optional dest path; default to /home/gem/uploads/<filename>
+		destPath := strings.TrimSpace(r.FormValue("path"))
+		if destPath == "" {
+			destPath = "/home/gem/uploads/" + header.Filename
+		}
+
+		sandboxPath, err := deps.Sandbox.UploadFile(file, destPath)
+		if err != nil {
+			log.Printf("Upload error for session %s: %v", id, err)
+			http.Error(w, "Upload failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// If no message, return JSON result
+		userMsg := strings.TrimSpace(r.FormValue("message"))
+		if userMsg == "" {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			mimeType := detectMIMEType(header.Filename, header.Header.Get("Content-Type"))
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"path":      sandboxPath,
+				"filename":  header.Filename,
+				"size":      header.Size,
+				"mime_type": mimeType,
+				"is_image":  strings.HasPrefix(mimeType, "image/"),
+			})
+			return
+		}
+
+		mimeType := detectMIMEType(header.Filename, header.Header.Get("Content-Type"))
+
+		// Stream agent response via SSE
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		sse := &httpSSEWriter{w: w, flusher: flusher}
+		if err := RunAgentWithContent(deps, sess, UserMessageContent{
+			Text: userMsg,
+			Attachments: []Attachment{{
+				Path:     sandboxPath,
+				Filename: header.Filename,
+				Size:     header.Size,
+				MIMEType: mimeType,
+				IsImage:  strings.HasPrefix(mimeType, "image/"),
+			}},
+		}, sse); err != nil {
+			log.Printf("Agent error for upload session %s: %v", id, err)
+		}
+	})
+
+	// Stream file content from sandbox for inline previews.
+	mux.HandleFunc("GET /api/files/content", func(w http.ResponseWriter, r *http.Request) {
+		sandboxPath := r.URL.Query().Get("path")
+		if sandboxPath == "" {
+			http.Error(w, "path query parameter is required", http.StatusBadRequest)
+			return
+		}
+
+		reader, err := deps.Sandbox.DownloadFile(sandboxPath)
+		if err != nil {
+			log.Printf("Content fetch error for %s: %v", sandboxPath, err)
+			http.Error(w, "Failed to fetch file: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		contentType := detectMIMEType(filepath.Base(sandboxPath), "")
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Cache-Control", "private, max-age=300")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		if _, err := io.Copy(w, reader); err != nil {
+			log.Printf("Error streaming preview %s: %v", sandboxPath, err)
+		}
 	})
 
 	// Download file from sandbox
@@ -218,4 +333,20 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
+}
+
+func detectMIMEType(filename, headerType string) string {
+	if headerType != "" {
+		if mediaType, _, err := mime.ParseMediaType(headerType); err == nil {
+			return mediaType
+		}
+		return headerType
+	}
+	if byExt := mime.TypeByExtension(strings.ToLower(filepath.Ext(filename))); byExt != "" {
+		if mediaType, _, err := mime.ParseMediaType(byExt); err == nil {
+			return mediaType
+		}
+		return byExt
+	}
+	return ""
 }

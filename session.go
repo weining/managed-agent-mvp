@@ -20,6 +20,19 @@ type Event struct {
 	Timestamp time.Time   `json:"timestamp"`
 }
 
+type Attachment struct {
+	Path     string `json:"path"`
+	Filename string `json:"filename"`
+	Size     int64  `json:"size,omitempty"`
+	MIMEType string `json:"mime_type,omitempty"`
+	IsImage  bool   `json:"is_image,omitempty"`
+}
+
+type UserMessageContent struct {
+	Text        string       `json:"text"`
+	Attachments []Attachment `json:"attachments,omitempty"`
+}
+
 type Session struct {
 	ID           string            `json:"id"`
 	Events       []Event           `json:"events"`

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,6 +14,15 @@ import (
 	"github.com/agent-infra/sandbox-sdk-go/client"
 	"github.com/agent-infra/sandbox-sdk-go/option"
 )
+
+// namedReader wraps an io.Reader and implements the Named interface required by
+// the SDK's multipart writer to set the filename on the form field.
+type namedReader struct {
+	io.Reader
+	name string
+}
+
+func (n *namedReader) Name() string { return n.name }
 
 // SDKSandboxClient wraps the sandbox-sdk-go client.
 type SDKSandboxClient struct {
@@ -707,6 +717,33 @@ func (s *SDKSandboxClient) DownloadFile(path string) (io.Reader, error) {
 		return nil, fmt.Errorf("failed to download file: %w", err)
 	}
 	return reader, nil
+}
+
+// UploadFile uploads an io.Reader to the sandbox at the given destination path.
+// If destPath is empty, the file is placed in /tmp/<filename>.
+func (s *SDKSandboxClient) UploadFile(r io.Reader, destPath string) (string, error) {
+	ctx := context.Background()
+	// Derive filename from destPath so the SDK multipart writer sets filename on the part.
+	filename := filepath.Base(destPath)
+	if filename == "" || filename == "." {
+		filename = "upload"
+	}
+	req := &api.BodyUploadFile{File: &namedReader{Reader: r, name: filename}}
+	if destPath != "" {
+		req.Path = &destPath
+	}
+	resp, err := s.client.File.UploadFile(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("failed to upload file: %w", err)
+	}
+	if resp == nil || resp.Data == nil {
+		return "", fmt.Errorf("upload returned empty response")
+	}
+	d := resp.Data
+	if !d.GetSuccess() {
+		return "", fmt.Errorf("upload failed (success=false)")
+	}
+	return d.GetFilePath(), nil
 }
 
 func (s *SDKSandboxClient) writeFileBytes(path string, data []byte) error {

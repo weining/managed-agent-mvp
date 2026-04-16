@@ -209,6 +209,22 @@ func TestSandboxTools(t *testing.T) {
 		pass("BrowserPressKey", out)
 	}
 
+	t.Log("\n── UploadFile ───────────────────────────────────────────────────────")
+	uploadContent := strings.NewReader("hello upload test\n")
+	if uploadedPath, err := sbx.UploadFile(uploadContent, "/tmp/_test_upload.txt"); err != nil {
+		fail("UploadFile", err)
+	} else {
+		// Verify by reading back
+		content, readErr := sbx.ReadFile(uploadedPath)
+		if readErr != nil {
+			fail("UploadFile read-back", readErr)
+		} else if !strings.Contains(content, "hello upload test") {
+			fail("UploadFile read-back", fmt.Errorf("unexpected content: %s", content))
+		} else {
+			pass("UploadFile", fmt.Sprintf("path=%s content-verified", uploadedPath))
+		}
+	}
+
 	t.Log("\n── BrowserClick (by coordinates) ────────────────────────────────────")
 	x, y := 400.0, 300.0
 	if out, err := sbx.BrowserClick("", nil, &x, &y); err != nil {
