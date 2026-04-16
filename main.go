@@ -2,8 +2,11 @@ package main
 
 import (
 	"flag"
+	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"managed-agent/llm"
 )
@@ -20,6 +23,16 @@ func main() {
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("Invalid config: %v", err)
 	}
+
+	// Setup log file: write to both stdout and data/agent.log
+	logDir := filepath.Dir(cfg.DataDir) // "data"
+	os.MkdirAll(logDir, 0755)
+	logFile, err := os.OpenFile(filepath.Join(logDir, "agent.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		log.Fatalf("Failed to open log file: %v", err)
+	}
+	defer logFile.Close()
+	log.SetOutput(io.MultiWriter(os.Stdout, logFile))
 
 	// Initialize session store (file-based)
 	store, err := NewSessionStore(cfg.DataDir)
