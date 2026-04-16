@@ -6,6 +6,7 @@ import (
 	"log"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"managed-agent/llm"
 )
@@ -103,6 +104,9 @@ type AgentDeps struct {
 func buildSystemPrompt(skills *SkillRegistry, activeSkills []string, skillArgs map[string]string) string {
 	var sb strings.Builder
 	sb.WriteString(baseSystemPrompt)
+	sb.WriteString("\n\n## 当前时间\n")
+	sb.WriteString(time.Now().Format("2006-01-02 15:04:05 (Monday)"))
+	sb.WriteString("\n")
 	sb.WriteString(skills.SkillSummary())
 	sb.WriteString(skills.ActiveSkillsPrompt(activeSkills, skillArgs))
 	return sb.String()
