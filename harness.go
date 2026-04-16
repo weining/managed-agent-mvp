@@ -181,13 +181,17 @@ func RunAgent(deps *AgentDeps, sess *Session, userMsg string, sse SSEWriter) err
 				hasToolUse = true
 				inputMap := toInputMap(block.Input)
 
+				evtContent := map[string]interface{}{
+					"id":    block.ID,
+					"name":  block.Name,
+					"input": inputMap,
+				}
+				if block.ThoughtSignature != "" {
+					evtContent["thought_signature"] = block.ThoughtSignature
+				}
 				store.EmitEvent(sess.ID, Event{
-					Type: "tool_use",
-					Content: map[string]interface{}{
-						"id":    block.ID,
-						"name":  block.Name,
-						"input": inputMap,
-					},
+					Type:    "tool_use",
+					Content: evtContent,
 				})
 
 				// Dispatch: skill tool is handled locally, everything else goes to sandbox
@@ -449,11 +453,13 @@ func buildMessages(events []Event) []llm.ClaudeMessage {
 			id, _ := m["id"].(string)
 			name, _ := m["name"].(string)
 			input := m["input"]
+			thoughtSig, _ := m["thought_signature"].(string)
 			pendingAssistant = append(pendingAssistant, llm.ContentBlock{
-				Type:  "tool_use",
-				ID:    id,
-				Name:  name,
-				Input: input,
+				Type:             "tool_use",
+				ID:               id,
+				Name:             name,
+				Input:            input,
+				ThoughtSignature: thoughtSig,
 			})
 
 		case "tool_result":
