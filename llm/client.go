@@ -70,7 +70,7 @@ type debugClient struct {
 
 func (d *debugClient) CallStream(system string, messages []ClaudeMessage, tools []ClaudeTool, cb StreamCallback) (*ClaudeResponse, error) {
 	reqJSON, _ := json.MarshalIndent(map[string]interface{}{
-		"system":   system[:min(len(system), 500)] + "...",
+		"system":   system,
 		"messages": messages,
 		"tools":    len(tools),
 	}, "", "  ")
