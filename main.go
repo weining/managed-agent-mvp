@@ -65,11 +65,12 @@ func main() {
 	log.Printf("Skills loaded: %d from %s", len(skills.List()), cfg.SkillsDir)
 
 	deps := &AgentDeps{
-		Store:   store,
-		Sandbox: sbx,
-		Claude:  llmClient,
-		Skills:  skills,
-		Config:  cfg,
+		Store:      store,
+		Sandbox:    sbx,
+		Claude:     llmClient,
+		Skills:     skills,
+		Config:     cfg,
+		ImageCache: NewImageCache(),
 	}
 
 	// Setup routes and start server
