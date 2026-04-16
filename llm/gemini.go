@@ -38,7 +38,6 @@ type geminiPart struct {
 	Text             string              `json:"text,omitempty"`
 	FunctionCall     *geminiFunctionCall `json:"functionCall,omitempty"`
 	FunctionResp     *geminiFunctionResp `json:"functionResponse,omitempty"`
-	Thought          bool                `json:"thought,omitempty"`
 	ThoughtSignature string              `json:"thoughtSignature,omitempty"`
 }
 
@@ -144,18 +143,12 @@ func (c *GeminiClient) CallStream(system string, messages []ClaudeMessage, tools
 				case "text":
 					parts = append(parts, geminiPart{Text: block.Text})
 				case "tool_use":
-					// If the original response included a thought signature, replay
-					// it as a thought part before the functionCall — Gemini requires
-					// this when thinking mode was active.
-					if block.ThoughtSignature != "" {
-						parts = append(parts, geminiPart{
-							Thought:          true,
-							ThoughtSignature: block.ThoughtSignature,
-						})
-					}
+					// thoughtSignature must be on the same Part as functionCall,
+					// not a separate part — Gemini requires it for history replay.
 					args := toGeminiArgs(block.Input)
 					parts = append(parts, geminiPart{
-						FunctionCall: &geminiFunctionCall{Name: block.Name, Args: args},
+						FunctionCall:     &geminiFunctionCall{Name: block.Name, Args: args},
+						ThoughtSignature: block.ThoughtSignature,
 					})
 				}
 			}
@@ -240,13 +233,7 @@ func (c *GeminiClient) CallStream(system string, messages []ClaudeMessage, tools
 		}
 
 		for _, cand := range chunk.Candidates {
-			var pendingThoughtSig string
 			for _, part := range cand.Content.Parts {
-				// Capture thought signature emitted before functionCall parts.
-				if part.Thought && part.ThoughtSignature != "" {
-					pendingThoughtSig = part.ThoughtSignature
-					continue
-				}
 				if part.Text != "" {
 					textBuf.WriteString(part.Text)
 					cb("text", part.Text)
@@ -268,14 +255,15 @@ func (c *GeminiClient) CallStream(system string, messages []ClaudeMessage, tools
 						"name":  part.FunctionCall.Name,
 						"input": input,
 					})
+					// thoughtSignature is on the same Part as functionCall
+					// (not a separate part) — must be preserved for history replay.
 					toolBlocks = append(toolBlocks, ContentBlock{
 						Type:             "tool_use",
 						ID:               id,
 						Name:             part.FunctionCall.Name,
 						Input:            input,
-						ThoughtSignature: pendingThoughtSig,
+						ThoughtSignature: part.ThoughtSignature,
 					})
-					pendingThoughtSig = ""
 				}
 			}
 			if cand.FinishReason != "" && cand.FinishReason != "STOP" {
