@@ -7,15 +7,37 @@ import (
 	"testing"
 )
 
+func requireSandboxForIntegrationTest(t *testing.T) *Config {
+	t.Helper()
+
+	if os.Getenv("RUN_SANDBOX_TESTS") != "1" {
+		t.Skip("set RUN_SANDBOX_TESTS=1 to run sandbox integration tests")
+	}
+
+	configPath := os.Getenv("TEST_CONFIG")
+	if configPath == "" {
+		configPath = "config.yaml"
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Skipf("failed to load %s: %v", configPath, err)
+	}
+	if cfg.SandboxBaseURL == "" || cfg.SandboxID == "" {
+		t.Skip("sandbox is not configured")
+	}
+	if strings.Contains(cfg.SandboxBaseURL, "your-sandbox.example.com") || cfg.SandboxID == "your-sandbox-id" {
+		t.Skip("sandbox config still uses placeholder values")
+	}
+	return cfg
+}
+
 // TestSandboxTools is an integration test that exercises all new/modified SDK methods
 // against the real sandbox. Run with:
 //
-//	go test -v -run TestSandboxTools -timeout 120s
+//	RUN_SANDBOX_TESTS=1 go test -v -run TestSandboxTools -timeout 120s
 func TestSandboxTools(t *testing.T) {
-	cfg, err := LoadConfig("config.yaml")
-	if err != nil || cfg.SandboxBaseURL == "" {
-		t.Skip("config.yaml not found or sandbox_base_url not set; skipping integration tests")
-	}
+	cfg := requireSandboxForIntegrationTest(t)
 
 	sbx := NewSDKSandboxClient(cfg.SandboxBaseURL, cfg.SandboxID)
 	if err := sbx.Init(); err != nil {
@@ -257,10 +279,7 @@ func TestSandboxTools(t *testing.T) {
 
 // TestSandboxBasic tests the core operations that should always work.
 func TestSandboxBasic(t *testing.T) {
-	cfg, err := LoadConfig("config.yaml")
-	if err != nil || cfg.SandboxBaseURL == "" {
-		t.Skip("sandbox not configured")
-	}
+	cfg := requireSandboxForIntegrationTest(t)
 	sbx := NewSDKSandboxClient(cfg.SandboxBaseURL, cfg.SandboxID)
 	if err := sbx.Init(); err != nil {
 		t.Fatalf("sandbox init: %v", err)

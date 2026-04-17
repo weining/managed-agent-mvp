@@ -49,7 +49,7 @@ func main() {
 
 	// Initialize LLM client
 	llmClient, err := llm.New(llm.ParseConfig(
-		cfg.LLMProvider, cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.LLMModel, cfg.LLMMaxTokens,
+		cfg.LLMProvider, cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.LLMModel, cfg.LLMMaxTokens, cfg.LLMCustomHeader,
 		cfg.LLMDebug == "true",
 	))
 	if err != nil {

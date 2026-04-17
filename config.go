@@ -37,12 +37,12 @@ type Config struct {
 // DefaultConfig returns configuration with default values.
 func DefaultConfig() *Config {
 	return &Config{
-		LLMBaseURL:     "https://oneapi-comate.baidu-int.com",
+		LLMBaseURL:     "https://api.openai.com/v1",
 		LLMModel:       "Claude Sonnet 4.6",
 		LLMMaxTokens:   "8192",
 		LLMProvider:    "claude",
-		SandboxBaseURL: "https://8080-t6nk21b8.agent-sandbox.baidu-int.com",
-		SandboxID:      "t6nk21b8",
+		SandboxBaseURL: "https://your-sandbox.example.com",
+		SandboxID:      "your-sandbox-id",
 		ListenAddr:     ":8080",
 		DataDir:        "data/sessions",
 		SkillsDir:      "skills",

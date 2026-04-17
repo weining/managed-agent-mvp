@@ -17,16 +17,17 @@ type StreamCallback func(eventType string, data interface{})
 
 // Config holds the parameters needed to construct an LLM client.
 type Config struct {
-	Provider  string
-	BaseURL   string
-	APIKey    string
-	Model     string
-	MaxTokens int
-	Debug     bool
+	Provider     string
+	BaseURL      string
+	APIKey       string
+	Model        string
+	MaxTokens    int
+	CustomHeader string
+	Debug        bool
 }
 
 // ParseConfig converts string-based config values into a typed Config.
-func ParseConfig(provider, baseURL, apiKey, model, maxTokensStr string, debug bool) Config {
+func ParseConfig(provider, baseURL, apiKey, model, maxTokensStr, customHeader string, debug bool) Config {
 	maxTokens := 8192
 	if maxTokensStr != "" {
 		if v, err := strconv.Atoi(maxTokensStr); err == nil && v > 0 {
@@ -34,12 +35,13 @@ func ParseConfig(provider, baseURL, apiKey, model, maxTokensStr string, debug bo
 		}
 	}
 	return Config{
-		Provider:  provider,
-		BaseURL:   baseURL,
-		APIKey:    apiKey,
-		Model:     model,
-		MaxTokens: maxTokens,
-		Debug:     debug,
+		Provider:     provider,
+		BaseURL:      baseURL,
+		APIKey:       apiKey,
+		Model:        model,
+		MaxTokens:    maxTokens,
+		CustomHeader: customHeader,
+		Debug:        debug,
 	}
 }
 

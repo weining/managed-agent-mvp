@@ -14,12 +14,12 @@ import (
 // --- Anthropic Messages API internal types ---
 
 type claudeRequest struct {
-	Model     string         `json:"model"`
-	MaxTokens int            `json:"max_tokens"`
-	System    string         `json:"system,omitempty"`
+	Model     string          `json:"model"`
+	MaxTokens int             `json:"max_tokens"`
+	System    string          `json:"system,omitempty"`
 	Messages  []ClaudeMessage `json:"messages"`
-	Tools     []ClaudeTool   `json:"tools,omitempty"`
-	Stream    bool           `json:"stream,omitempty"`
+	Tools     []ClaudeTool    `json:"tools,omitempty"`
+	Stream    bool            `json:"stream,omitempty"`
 }
 
 type contentBlockStart struct {
@@ -59,23 +59,17 @@ type ClaudeClient struct {
 	APIKey       string
 	Model        string
 	MaxTokens    int
-	CustomHeader string // JSON string for comate_custom_header, empty to skip
+	CustomHeader string // JSON object of extra HTTP headers, empty to skip
 }
 
 func newClaudeClient(cfg Config) *ClaudeClient {
 	return &ClaudeClient{
-		BaseURL:   cfg.BaseURL,
-		APIKey:    cfg.APIKey,
-		Model:     cfg.Model,
-		MaxTokens: cfg.MaxTokens,
+		BaseURL:      cfg.BaseURL,
+		APIKey:       cfg.APIKey,
+		Model:        cfg.Model,
+		MaxTokens:    cfg.MaxTokens,
+		CustomHeader: cfg.CustomHeader,
 	}
-}
-
-// NewClaudeClientWithCustomHeader creates a ClaudeClient with a custom header.
-func NewClaudeClientWithCustomHeader(cfg Config, customHeader string) *ClaudeClient {
-	c := newClaudeClient(cfg)
-	c.CustomHeader = customHeader
-	return c
 }
 
 func (c *ClaudeClient) setHeaders(req *http.Request) {
@@ -83,7 +77,17 @@ func (c *ClaudeClient) setHeaders(req *http.Request) {
 	req.Header.Set("x-api-key", c.APIKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 	if c.CustomHeader != "" {
-		req.Header.Set("comate_custom_header", c.CustomHeader)
+		var headers map[string]string
+		if err := json.Unmarshal([]byte(c.CustomHeader), &headers); err != nil {
+			log.Printf("Warning: failed to parse llm_custom_header: %v", err)
+			return
+		}
+		for key, value := range headers {
+			if key == "" {
+				continue
+			}
+			req.Header.Set(key, value)
+		}
 	}
 }
 

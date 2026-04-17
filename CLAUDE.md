@@ -30,8 +30,8 @@ make all      # prepare + compile + test + package
 ```yaml
 llm_api_key: sk-...
 llm_base_url: https://...
-sandbox_base_url: https://8080-xxx.agent-sandbox.baidu-int.com
-sandbox_id: xxxxxxxx
+sandbox_base_url: https://your-sandbox.example.com
+sandbox_id: your-sandbox-id
 ```
 
 **注意**：`config.yaml` 包含密钥，已加入 `.gitignore`。首次使用请复制 `config.example.yaml`：
@@ -48,25 +48,25 @@ cp config.example.yaml config.yaml
 | `llm_model` | 模型名称 | `Claude Sonnet 4.6` |
 | `llm_max_tokens` | 最大输出 token 数 | `8192` |
 | `llm_debug` | 设为 `true` 时将完整 LLM 请求/响应写入日志（仅调试用，日志量大） | `false` |
-| `llm_custom_header` | 注入 LLM 请求的自定义 HTTP 头（JSON 字符串，用于百度内部 OneAPI 鉴权） | 空 |
+| `llm_custom_header` | 注入 LLM 请求的自定义 HTTP 头（JSON 字符串） | 空 |
 | `max_loop_rounds` | 每次请求最大工具调用轮数，超出则返回错误 | `50` |
 | `listen_addr` | HTTP 服务监听地址 | `:8080` |
 | `data_dir` | 会话数据存储目录 | `data/sessions` |
 | `skills_dir` | Skills 目录 | `skills` |
 
-首次运行前需解压内置 Skills：`unzip skills.zip`
+仓库默认直接包含 `skills/` 目录，首次运行前无需额外解压内置 Skills。
 
 ## 架构
 
-整个服务是单包 `main` 的 Go 程序，所有 `.go` 文件共享 `package main`。核心设计将 **LLM 推理**（Claude API）与**工具执行**（Sandbox 服务）解耦，通过持久化事件日志串联两者。
+整个服务是单包 `main` 的 Go 程序，所有 `.go` 文件共享 `package main`。核心设计将 **LLM 推理**（LLM API）与**工具执行**（Sandbox 服务）解耦，通过持久化事件日志串联两者。
 
 **用户消息的处理流程：**
 1. `api.go:setupRoutes` 接收 HTTP 请求 → 处理 `/skill-name` 快捷激活，或转交 `RunAgent`
 2. `harness.go:RunAgent` 加载会话事件，构建系统 prompt（基础 prompt + skill 摘要 + 激活 skill 的完整 prompt），调用 `LLMClient.CallStream`（由 `config.llm_provider` 决定实际实现：claude/gemini/openai）
-3. Claude 返回文本或工具调用；工具调用按类型分发：
+3. LLM 返回文本或工具调用；工具调用按类型分发：
    - `skill` 工具 → 在 `harness.go:executeSkillTool` 本地处理（activate/deactivate/list）
    - 其他工具 → 经 `tools.go:ExecuteTool` 转发至 `sandbox_sdk.go:SDKSandboxClient`
-4. 工具结果作为事件持久化，并在下一轮循环中回传给 Claude
+4. 工具结果作为事件持久化，并在下一轮循环中回传给 LLM
 5. 所有中间事件通过 SSE 实时推送给客户端
 
 **核心文件说明：**

@@ -1,24 +1,26 @@
 # Managed Agent Configuration
 #
+# Copy this file to config.yaml before running:
+#   cp config.example.yaml config.yaml
+#
 # Priority: environment variables > this file > defaults
-# All fields are optional — defaults are used when not specified.
 
 # ── LLM ──────────────────────────────────────────────
-# 可选: claude（默认）/ gemini / openai
+# Options: claude / gemini / openai
 llm_provider: claude
-llm_base_url: https://oneapi-comate.baidu-int.com
+llm_base_url: https://your-llm-provider.example.com
 llm_api_key: sk-your-api-key-here
-llm_model: Claude Sonnet 4.6
-llm_max_tokens: 128000
-llm_debug: true
+llm_model: claude-sonnet-4-6
+llm_max_tokens: 8192
+llm_debug: false
 
-# Custom header for LLM API requests (JSON string, optional).
-# Example for internal Baidu OneAPI:
-# llm_custom_header: {"agentId": "ducc:user:yourname", "username": "yourname", "repo": "", "source": "ducc"}
+# Optional JSON string with extra HTTP headers for the LLM API.
+# Example:
+# llm_custom_header: {"x-trace-id": "demo-request-id"}
 
 # ── Sandbox ──────────────────────────────────────────
-sandbox_base_url: https://8080-p50m6827.agent-sandbox.baidu-int.com
-sandbox_id: p50m6827
+sandbox_base_url: https://your-sandbox.example.com
+sandbox_id: your-sandbox-id
 
 # ── Server ───────────────────────────────────────────
 listen_addr: :8080
