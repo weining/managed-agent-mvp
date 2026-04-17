@@ -45,6 +45,12 @@
 - **Sandbox 访问地址**（形如 `https://8080-xxxxxxxx.agent-sandbox.baidu-int.com`）
 - **Sandbox ID**（形如 `xxxxxxxx`）
 
+> **推荐使用自定义镜像**：申请沙箱时，镜像地址填写：
+> ```
+> iregistry.baidu-int.com/magellan-public/vefaas-public/all-in-one-sandbox-ducc:1.6.3
+> ```
+> 该镜像已预装本项目所需的完整运行环境。
+
 ### 第二步：配置 config.yaml
 
 编辑项目根目录下的 `config.yaml`，填入必要参数：
