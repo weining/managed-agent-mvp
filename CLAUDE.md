@@ -53,6 +53,8 @@ cp config.example.yaml config.yaml
 | `listen_addr` | HTTP 服务监听地址 | `:8080` |
 | `data_dir` | 会话数据存储目录 | `data/sessions` |
 | `skills_dir` | Skills 目录 | `skills` |
+| `memory_event_threshold` | 事件数超过此值时触发会话摘要 | `40` |
+| `memory_recent_count` | 摘要时保留最近事件数（滑动窗口尾部） | `20` |
 
 仓库默认直接包含 `skills/` 目录，首次运行前无需额外解压内置 Skills。
 
@@ -79,7 +81,8 @@ cp config.example.yaml config.yaml
 - `llm/gemini.go` — `GeminiClient` 实现（Google Gemini streamGenerateContent API），序列化 `image` block 为 `inlineData` part
 - `llm/openai.go` — `OpenAIClient` 实现（OpenAI 兼容 /v1/chat/completions API），序列化 `image` block 为 `image_url` 格式；`buildOAIMessages` 负责消息格式转换
 - `sandbox_sdk.go` — `SDKSandboxClient`：封装 `github.com/agent-infra/sandbox-sdk-go`，提供 `ExecCommand`、`WriteFile`、`ReadFile`、`DownloadFile`
-- `tools.go` — `ToolDefinitions`（Claude 工具 schema）与 `ExecuteTool`（分发至 Sandbox SDK）
+- `tools.go` — `ToolDefinitions`（Claude 工具 schema）与 `ExecuteTool`（分发至 Sandbox SDK）；含 `memory` 工具（save/recall/delete/list）
+- `memory.go` — 跨会话记忆系统：`MemoryStore` 接口、`FileMemoryStore`（JSON 文件持久化）、`buildMemoryPrompt`（注入系统 prompt）、`extractMemories`（自动提取）、`summarizeEvents`（增量摘要）
 - `config.go` — `Config` 含手写 YAML 解析器（无外部依赖），环境变量名为字段名大写加下划线
 
 ## Skills 系统
@@ -101,6 +104,34 @@ Prompt 内容写在这里...
 - Prompt 正文中的相对路径引用（如 `scripts/foo.sh`）会自动改写为沙箱绝对路径
 - Prompt 正文中的 `$ARGUMENTS` 占位符会被 `/skill-name <args>` 中的参数替换
 - 每个会话的激活 skill 列表存储于 `session.ActiveSkills []string`
+
+## 记忆系统
+
+跨会话持久化记忆 + 会话内长上下文管理，混合模式（自动提取 + 显式工具管理）。
+
+**存储**：`data/memory.json`（JSON 文件，`FileMemoryStore` 实现 `MemoryStore` 接口）
+
+**去重策略**（`Save` 方法三层检查）：
+1. Key 精确匹配 → 更新已有条目
+2. Content 归一化匹配（trim + lowercase）→ 合并到已有条目，采用新 key，合并 tags
+3. 以上均不匹配 → 新建条目
+
+**自动提取**：Agent 循环结束时异步调用 `extractMemories`，通过 LLM 从新增对话中提取用户偏好、项目决策等
+
+**系统 prompt 注入**：`buildMemoryPrompt` 将最多 50 条记忆（~2000 token 预算）格式化注入系统 prompt
+
+**滑动窗口 + 增量摘要**：
+- 当事件数超过 `memory_event_threshold`（默认 40）时触发
+- 最小增量门控：新增至少 6 条事件才重新摘要，避免频繁触发
+- 增量模式：已有旧摘要时，只传 "旧摘要 + 新增事件" 给 LLM 合并，避免全量重做
+- 摘要结果持久化于 `session.ConversationSummary`，后续循环直接复用
+
+**`memory` 工具**：LLM 可主动调用 `save`/`recall`/`delete`/`list` 操作管理记忆
+
+**Session 扩展字段**：
+- `MemoryExtractedIndex` — 自动提取已处理到的事件下标
+- `ConversationSummary` — 当前会话的增量摘要文本
+- `SummaryUpToEventIndex` — 摘要覆盖的事件范围上界
 
 ## 会话事件类型
 

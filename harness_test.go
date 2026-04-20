@@ -13,10 +13,10 @@ func TestBuildMessages_ImageBlock(t *testing.T) {
 	events := []Event{
 		{
 			Type: "user_message",
-			Content: map[string]interface{}{
+			Content: map[string]any{
 				"text": "what is this?",
-				"attachments": []interface{}{
-					map[string]interface{}{
+				"attachments": []any{
+					map[string]any{
 						"path":      "/home/gem/uploads/photo.jpg",
 						"filename":  "photo.jpg",
 						"mime_type": "image/jpeg",
@@ -27,7 +27,7 @@ func TestBuildMessages_ImageBlock(t *testing.T) {
 		},
 	}
 
-	msgs := buildMessages(events, cache)
+	msgs := buildMessages(events, cache, "", 0)
 
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(msgs))
@@ -71,10 +71,10 @@ func TestBuildMessages_ImageCacheMiss_FallbackToText(t *testing.T) {
 	events := []Event{
 		{
 			Type: "user_message",
-			Content: map[string]interface{}{
+			Content: map[string]any{
 				"text": "hello",
-				"attachments": []interface{}{
-					map[string]interface{}{
+				"attachments": []any{
+					map[string]any{
 						"path":      "/home/gem/uploads/photo.jpg",
 						"filename":  "photo.jpg",
 						"mime_type": "image/jpeg",
@@ -85,7 +85,7 @@ func TestBuildMessages_ImageCacheMiss_FallbackToText(t *testing.T) {
 		},
 	}
 
-	msgs := buildMessages(events, cache)
+	msgs := buildMessages(events, cache, "", 0)
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(msgs))
 	}
@@ -102,7 +102,7 @@ func TestBuildMessages_TextOnly(t *testing.T) {
 	events := []Event{
 		{Type: "user_message", Content: "plain text message"},
 	}
-	msgs := buildMessages(events, cache)
+	msgs := buildMessages(events, cache, "", 0)
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(msgs))
 	}

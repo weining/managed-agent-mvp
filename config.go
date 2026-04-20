@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strings"
 )
@@ -9,7 +11,8 @@ import (
 // Config holds all application configuration.
 type Config struct {
 	// LLM
-	LLMBaseURL      string `json:"llm_base_url"`
+	LLMBaseURL string `json:"llm_base_url"`
+
 	LLMAPIKey       string `json:"llm_api_key"`
 	LLMModel        string `json:"llm_model"`
 	LLMMaxTokens    string `json:"llm_max_tokens"`
@@ -21,32 +24,41 @@ type Config struct {
 
 	// Sandbox
 	SandboxBaseURL string `json:"sandbox_base_url"`
-	SandboxID      string `json:"sandbox_id"`
+
+	SandboxID string `json:"sandbox_id"`
 
 	// Server
 	ListenAddr string `json:"listen_addr"`
 
 	// Storage
-	DataDir   string `json:"data_dir"`
+	DataDir string `json:"data_dir"`
+
 	SkillsDir string `json:"skills_dir"`
 
 	// Agent behavior
 	MaxLoopRounds string `json:"max_loop_rounds"` // max tool-use iterations per request, default "50"
+
+	// Memory
+	MemoryEventThreshold string `json:"memory_event_threshold"` // event count to trigger summarization, default "40"
+
+	MemoryRecentCount string `json:"memory_recent_count"` // recent events to keep in full, default "20"
 }
 
 // DefaultConfig returns configuration with default values.
 func DefaultConfig() *Config {
 	return &Config{
-		LLMBaseURL:     "https://api.openai.com/v1",
-		LLMModel:       "Claude Sonnet 4.6",
-		LLMMaxTokens:   "8192",
-		LLMProvider:    "claude",
-		SandboxBaseURL: "https://your-sandbox.example.com",
-		SandboxID:      "your-sandbox-id",
-		ListenAddr:     ":8080",
-		DataDir:        "data/sessions",
-		SkillsDir:      "skills",
-		MaxLoopRounds:  "50",
+		LLMBaseURL:           "https://oneapi-comate.baidu-int.com",
+		LLMModel:             "Claude Sonnet 4.6",
+		LLMMaxTokens:         "8192",
+		LLMProvider:          "claude",
+		SandboxBaseURL:       "https://8080-t6nk21b8.agent-sandbox.baidu-int.com",
+		SandboxID:            "t6nk21b8",
+		ListenAddr:           ":8080",
+		DataDir:              "data/sessions",
+		SkillsDir:            "skills",
+		MaxLoopRounds:        "50",
+		MemoryEventThreshold: "40",
+		MemoryRecentCount:    "20",
 	}
 }
 
@@ -60,7 +72,7 @@ func LoadConfig(path string) (*Config, error) {
 	// Layer 2: config file
 	if path != "" {
 		if err := cfg.loadFile(path); err != nil {
-			if !os.IsNotExist(err) {
+			if !errors.Is(err, fs.ErrNotExist) {
 				return nil, fmt.Errorf("failed to load config file %s: %w", path, err)
 			}
 			// File not found is fine — use defaults + env
@@ -88,6 +100,8 @@ func (c *Config) applyEnv() {
 	envOverride(&c.DataDir, "DATA_DIR")
 	envOverride(&c.SkillsDir, "SKILLS_DIR")
 	envOverride(&c.MaxLoopRounds, "MAX_LOOP_ROUNDS")
+	envOverride(&c.MemoryEventThreshold, "MEMORY_EVENT_THRESHOLD")
+	envOverride(&c.MemoryRecentCount, "MEMORY_RECENT_COUNT")
 }
 
 func envOverride(target *string, key string) {
@@ -132,35 +146,37 @@ func (c *Config) loadFile(path string) error {
 // fieldMap returns a mapping from config file key names to their field pointers.
 func (c *Config) fieldMap() map[string]*string {
 	return map[string]*string{
-		"llm_base_url":      &c.LLMBaseURL,
-		"llm_api_key":       &c.LLMAPIKey,
-		"llm_model":         &c.LLMModel,
-		"llm_max_tokens":    &c.LLMMaxTokens,
-		"llm_custom_header": &c.LLMCustomHeader,
-		"llm_provider":      &c.LLMProvider,
-		"llm_debug":         &c.LLMDebug,
-		"sandbox_base_url":  &c.SandboxBaseURL,
-		"sandbox_id":        &c.SandboxID,
-		"listen_addr":       &c.ListenAddr,
-		"data_dir":          &c.DataDir,
-		"skills_dir":        &c.SkillsDir,
-		"max_loop_rounds":   &c.MaxLoopRounds,
+		"llm_base_url":           &c.LLMBaseURL,
+		"llm_api_key":            &c.LLMAPIKey,
+		"llm_model":              &c.LLMModel,
+		"llm_max_tokens":         &c.LLMMaxTokens,
+		"llm_custom_header":      &c.LLMCustomHeader,
+		"llm_provider":           &c.LLMProvider,
+		"llm_debug":              &c.LLMDebug,
+		"sandbox_base_url":       &c.SandboxBaseURL,
+		"sandbox_id":             &c.SandboxID,
+		"listen_addr":            &c.ListenAddr,
+		"data_dir":               &c.DataDir,
+		"skills_dir":             &c.SkillsDir,
+		"max_loop_rounds":        &c.MaxLoopRounds,
+		"memory_event_threshold": &c.MemoryEventThreshold,
+		"memory_recent_count":    &c.MemoryRecentCount,
 	}
 }
 
 // Validate checks required fields.
 func (c *Config) Validate() error {
 	if c.LLMBaseURL == "" {
-		return fmt.Errorf("llm_base_url is required")
+		return errors.New("llm_base_url is required")
 	}
 	if c.LLMAPIKey == "" {
-		return fmt.Errorf("llm_api_key is required (set in config.yaml or LLM_API_KEY env)")
+		return errors.New("llm_api_key is required (set in config.yaml or LLM_API_KEY env)")
 	}
 	if c.SandboxBaseURL == "" {
-		return fmt.Errorf("sandbox_base_url is required")
+		return errors.New("sandbox_base_url is required")
 	}
 	if c.SandboxID == "" {
-		return fmt.Errorf("sandbox_id is required")
+		return errors.New("sandbox_id is required")
 	}
 	return nil
 }

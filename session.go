@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,16 +10,13 @@ import (
 	"sort"
 	"sync"
 	"time"
-
-	"crypto/rand"
-	"encoding/hex"
 )
 
 type Event struct {
-	ID        string      `json:"id"`
-	Type      string      `json:"type"` // user_message | assistant_message | tool_use | tool_result | error
-	Content   interface{} `json:"content"`
-	Timestamp time.Time   `json:"timestamp"`
+	ID        string    `json:"id"`
+	Type      string    `json:"type"` // user_message | assistant_message | tool_use | tool_result | error
+	Content   any       `json:"content"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
 type Attachment struct {
@@ -41,6 +40,12 @@ type Session struct {
 	SandboxID    string            `json:"sandbox_id"`
 	Token        string            `json:"token"`
 	CreatedAt    time.Time         `json:"created_at"`
+
+	// Memory fields
+	MemoryExtractedIndex int `json:"memory_extracted_index,omitempty"`
+
+	ConversationSummary   string `json:"conversation_summary,omitempty"`
+	SummaryUpToEventIndex int    `json:"summary_up_to_event_index,omitempty"`
 }
 
 // SessionStore persists sessions as JSON files in dataDir.
@@ -189,6 +194,21 @@ func (s *SessionStore) SetSkillArgs(sessionID, skillName, args string) error {
 	} else {
 		sess.SkillArgs[skillName] = args
 	}
+	return s.save(sess)
+}
+
+// UpdateMemoryFields updates memory-related fields on a session.
+func (s *SessionStore) UpdateMemoryFields(sessionID string, extractedIdx int, summary string, summaryIdx int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	sess, err := s.load(sessionID)
+	if err != nil {
+		return err
+	}
+	sess.MemoryExtractedIndex = extractedIdx
+	sess.ConversationSummary = summary
+	sess.SummaryUpToEventIndex = summaryIdx
 	return s.save(sess)
 }
 

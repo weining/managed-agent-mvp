@@ -8,7 +8,7 @@ import (
 )
 
 // ToolDefinitions returns the tool schemas for Claude.
-func ToolDefinitions(hasSkills bool) []llm.ClaudeTool {
+func ToolDefinitions(hasSkills bool, hasMemory bool) []llm.ClaudeTool {
 	tools := []llm.ClaudeTool{
 		{
 			Name:        "execute_command",
@@ -216,11 +216,30 @@ func ToolDefinitions(hasSkills bool) []llm.ClaudeTool {
 		})
 	}
 
+	if hasMemory {
+		tools = append(tools, llm.ClaudeTool{
+			Name:        "memory",
+			Description: "管理跨会话持久记忆。save=保存记忆，recall=搜索回忆，delete=删除记忆，list=列出记忆。",
+			InputSchema: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"action":  {"type": "string", "enum": ["save", "recall", "delete", "list"], "description": "操作类型"},
+					"key":     {"type": "string", "description": "记忆键名（save/delete 时必需）"},
+					"content": {"type": "string", "description": "记忆内容（save 时必需）"},
+					"tags":    {"type": "array", "items": {"type": "string"}, "description": "分类标签"},
+					"query":   {"type": "string", "description": "搜索关键词（recall 时使用）"},
+					"limit":   {"type": "integer", "description": "返回数量上限，默认10"}
+				},
+				"required": ["action"]
+			}`),
+		})
+	}
+
 	return tools
 }
 
 // ExecuteTool routes a tool call to the sandbox via the SDK client.
-func ExecuteTool(sbx *SDKSandboxClient, name string, input map[string]interface{}) (string, bool) {
+func ExecuteTool(sbx *SDKSandboxClient, name string, input map[string]any) (string, bool) {
 	switch name {
 	case "execute_command":
 		cmd, _ := input["command"].(string)
@@ -294,7 +313,7 @@ func ExecuteTool(sbx *SDKSandboxClient, name string, input map[string]interface{
 	}
 }
 
-func executeMcpTool(sbx *SDKSandboxClient, input map[string]interface{}) (string, bool) {
+func executeMcpTool(sbx *SDKSandboxClient, input map[string]any) (string, bool) {
 	action, _ := input["action"].(string)
 	switch action {
 	case "list_servers":
@@ -319,9 +338,9 @@ func executeMcpTool(sbx *SDKSandboxClient, input map[string]interface{}) (string
 		if server == "" || tool == "" {
 			return "Error: server_name and tool_name are required for call_tool", true
 		}
-		args, _ := input["arguments"].(map[string]interface{})
+		args, _ := input["arguments"].(map[string]any)
 		if args == nil {
-			args = map[string]interface{}{}
+			args = map[string]any{}
 		}
 		result, err := sbx.McpCallTool(server, tool, args)
 		if err != nil {
@@ -333,7 +352,7 @@ func executeMcpTool(sbx *SDKSandboxClient, input map[string]interface{}) (string
 	}
 }
 
-func executeBrowserAction(sbx *SDKSandboxClient, input map[string]interface{}) (string, bool) {
+func executeBrowserAction(sbx *SDKSandboxClient, input map[string]any) (string, bool) {
 	action, _ := input["action"].(string)
 	switch action {
 	case "navigate":
@@ -437,7 +456,7 @@ func executeBrowserAction(sbx *SDKSandboxClient, input map[string]interface{}) (
 	}
 }
 
-func executeCodeTool(sbx *SDKSandboxClient, input map[string]interface{}) (string, bool) {
+func executeCodeTool(sbx *SDKSandboxClient, input map[string]any) (string, bool) {
 	language, _ := input["language"].(string)
 	code, _ := input["code"].(string)
 	sessionID, _ := input["session_id"].(string)
@@ -453,7 +472,7 @@ func executeCodeTool(sbx *SDKSandboxClient, input map[string]interface{}) (strin
 	return result, false
 }
 
-func executeSearchFiles(sbx *SDKSandboxClient, input map[string]interface{}) (string, bool) {
+func executeSearchFiles(sbx *SDKSandboxClient, input map[string]any) (string, bool) {
 	action, _ := input["action"].(string)
 	path, _ := input["path"].(string)
 	pattern, _ := input["pattern"].(string)
@@ -474,14 +493,14 @@ func executeSearchFiles(sbx *SDKSandboxClient, input map[string]interface{}) (st
 		return result, false
 	case "grep":
 		var include, exclude []string
-		if v, ok := input["include"].([]interface{}); ok {
+		if v, ok := input["include"].([]any); ok {
 			for _, item := range v {
 				if s, ok := item.(string); ok {
 					include = append(include, s)
 				}
 			}
 		}
-		if v, ok := input["exclude"].([]interface{}); ok {
+		if v, ok := input["exclude"].([]any); ok {
 			for _, item := range v {
 				if s, ok := item.(string); ok {
 					exclude = append(exclude, s)
@@ -509,7 +528,7 @@ func executeSearchFiles(sbx *SDKSandboxClient, input map[string]interface{}) (st
 	}
 }
 
-func executeFileEdit(sbx *SDKSandboxClient, input map[string]interface{}) (string, bool) {
+func executeFileEdit(sbx *SDKSandboxClient, input map[string]any) (string, bool) {
 	command, _ := input["command"].(string)
 	path, _ := input["path"].(string)
 	if command == "" || path == "" {
@@ -522,7 +541,7 @@ func executeFileEdit(sbx *SDKSandboxClient, input map[string]interface{}) (strin
 	return result, false
 }
 
-func executeShellSession(sbx *SDKSandboxClient, input map[string]interface{}) (string, bool) {
+func executeShellSession(sbx *SDKSandboxClient, input map[string]any) (string, bool) {
 	action, _ := input["action"].(string)
 	switch action {
 	case "create":
@@ -589,7 +608,7 @@ func executeShellSession(sbx *SDKSandboxClient, input map[string]interface{}) (s
 	}
 }
 
-func executeDisplayRecord(sbx *SDKSandboxClient, input map[string]interface{}) (string, bool) {
+func executeDisplayRecord(sbx *SDKSandboxClient, input map[string]any) (string, bool) {
 	action, _ := input["action"].(string)
 	result, err := sbx.DisplayRecord(action)
 	if err != nil {
@@ -600,7 +619,7 @@ func executeDisplayRecord(sbx *SDKSandboxClient, input map[string]interface{}) (
 
 // executeDownloadFile generates a download URL for a sandbox file.
 // Returns a JSON payload that the frontend can parse to render a download button.
-func executeDownloadFile(input map[string]interface{}) (string, bool) {
+func executeDownloadFile(input map[string]any) (string, bool) {
 	path, _ := input["path"].(string)
 	if path == "" {
 		return "Error: path is required", true
@@ -610,4 +629,92 @@ func executeDownloadFile(input map[string]interface{}) (string, bool) {
 		"path": path,
 	})
 	return string(result), false
+}
+
+// executeMemoryTool handles the "memory" tool calls.
+func executeMemoryTool(store MemoryStore, sessionID string, input map[string]any) (string, bool) {
+	action, _ := input["action"].(string)
+	limit := 10
+	if v, ok := input["limit"].(float64); ok && v > 0 {
+		limit = int(v)
+	}
+
+	switch action {
+	case "save":
+		key, _ := input["key"].(string)
+		content, _ := input["content"].(string)
+		if key == "" || content == "" {
+			return "Error: key and content are required for save", true
+		}
+		var tags []string
+		if v, ok := input["tags"].([]any); ok {
+			for _, item := range v {
+				if s, ok := item.(string); ok {
+					tags = append(tags, s)
+				}
+			}
+		}
+		entry := MemoryEntry{
+			Key:     key,
+			Content: content,
+			Tags:    tags,
+			Source:  sessionID,
+		}
+		if err := store.Save(entry); err != nil {
+			return "Error: " + err.Error(), true
+		}
+		return fmt.Sprintf("Memory saved: %s", key), false
+
+	case "recall":
+		query, _ := input["query"].(string)
+		var tags []string
+		if v, ok := input["tags"].([]any); ok {
+			for _, item := range v {
+				if s, ok := item.(string); ok {
+					tags = append(tags, s)
+				}
+			}
+		}
+		results, err := store.Search(query, tags, limit)
+		if err != nil {
+			return "Error: " + err.Error(), true
+		}
+		if len(results) == 0 {
+			return "No memories found.", false
+		}
+		data, _ := json.MarshalIndent(results, "", "  ")
+		return string(data), false
+
+	case "delete":
+		key, _ := input["key"].(string)
+		if key == "" {
+			return "Error: key is required for delete", true
+		}
+		if err := store.Delete(key); err != nil {
+			return "Error: " + err.Error(), true
+		}
+		return fmt.Sprintf("Memory deleted: %s", key), false
+
+	case "list":
+		var tags []string
+		if v, ok := input["tags"].([]any); ok {
+			for _, item := range v {
+				if s, ok := item.(string); ok {
+					tags = append(tags, s)
+				}
+			}
+		}
+		results, err := store.List(tags, limit)
+		if err != nil {
+			return "Error: " + err.Error(), true
+		}
+		if len(results) == 0 {
+			return "No memories stored.", false
+		}
+		data, _ := json.MarshalIndent(results, "", "  ")
+		return string(data), false
+
+	default:
+		return "Error: invalid memory action: " + action, true
+	}
 }

@@ -24,6 +24,8 @@ In this project:
 - Skills loaded from the versioned `skills/` directory
 - Explicit sandbox integration tests with opt-in execution
 - Simple deployment model with a built-in web UI
+- Cross-session memory with automatic extraction and content deduplication
+- Sliding window + incremental summarization for long context management
 
 ## Architecture
 
@@ -35,6 +37,10 @@ In this project:
                                   │  │  Session │  │   Skills    │  │
                                   │  │  Store   │  │  Registry   │  │
                                   │  └──────────┘  └─────────────┘  │
+                                  │  ┌──────────┐                   │
+                                  │  │  Memory  │                   │
+                                  │  │  Store   │                   │
+                                  │  └──────────┘                   │
                                   │         │             │          │
                                   │         ▼             ▼          │
                                   │      ┌─────────────────────┐    │
@@ -88,6 +94,15 @@ Core request flow:
 - Attachments are uploaded into the sandbox
 - Image attachments are fetched and converted into provider-native image blocks
 - Non-image files are passed as sandbox paths
+
+### Memory System
+
+- Persistent cross-session memory stored in `data/memory.json`
+- Hybrid management: automatic LLM extraction + explicit `memory` tool (save/recall/delete/list)
+- Three-level deduplication on save: key match → content match (normalized) → new entry
+- Memory entries are injected into system prompt for each conversation
+- Incremental summarization reuses previous summary + new events (avoids full re-processing)
+- Minimum increment gate (6 events) prevents excessive summarization calls
 
 ## Quick Start
 
@@ -172,6 +187,8 @@ Important fields:
 | `listen_addr` | HTTP listen address | `:8080` |
 | `data_dir` | Session storage directory | `data/sessions` |
 | `skills_dir` | Skills directory | `skills` |
+| `memory_event_threshold` | Event count threshold to trigger summarization | `40` |
+| `memory_recent_count` | Number of recent events to keep in sliding window | `20` |
 
 ## API
 

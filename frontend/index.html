@@ -1463,6 +1463,7 @@ async function loadSessions() {
   const response = await fetch(API + '/api/sessions');
   const sessions = await response.json();
   renderSessions(sessions || []);
+  return sessions || [];
 }
 
 function renderSessions(list) {
@@ -1771,7 +1772,12 @@ async function sendMessage() {
 
 renderEmptyState();
 updateComposerState();
-loadSessions();
+loadSessions().then(async (sessions) => {
+  // Auto-select the most recent session on page load
+  if (sessions && sessions.length > 0) {
+    await selectSession(sessions[0].id);
+  }
+});
 </script>
 </body>
 </html>

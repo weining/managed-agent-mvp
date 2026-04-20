@@ -49,8 +49,8 @@ func main() {
 
 	// Initialize LLM client
 	llmClient, err := llm.New(llm.ParseConfig(
-		cfg.LLMProvider, cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.LLMModel, cfg.LLMMaxTokens, cfg.LLMCustomHeader,
-		cfg.LLMDebug == "true",
+		cfg.LLMProvider, cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.LLMModel, cfg.LLMMaxTokens,
+		cfg.LLMCustomHeader, cfg.LLMDebug == "true",
 	))
 	if err != nil {
 		log.Fatalf("Failed to init LLM client: %v", err)
@@ -64,13 +64,22 @@ func main() {
 	}
 	log.Printf("Skills loaded: %d from %s", len(skills.List()), cfg.SkillsDir)
 
+	// Initialize memory store
+	memoryPath := filepath.Join(filepath.Dir(cfg.DataDir), "memory.json")
+	memoryStore, err := NewFileMemoryStore(memoryPath)
+	if err != nil {
+		log.Fatalf("Failed to init memory store: %v", err)
+	}
+	log.Printf("Memory store ready: %s", memoryPath)
+
 	deps := &AgentDeps{
-		Store:      store,
-		Sandbox:    sbx,
-		Claude:     llmClient,
-		Skills:     skills,
-		Config:     cfg,
-		ImageCache: NewImageCache(),
+		Store:       store,
+		Sandbox:     sbx,
+		Claude:      llmClient,
+		Skills:      skills,
+		Config:      cfg,
+		ImageCache:  NewImageCache(),
+		MemoryStore: memoryStore,
 	}
 
 	// Setup routes and start server
